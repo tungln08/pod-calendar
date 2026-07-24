@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lịch POD — đếm ngược</title>
+<style>
+:root{
+  --ink:#16181d; --ink-2:#5a6070; --ink-3:#8b91a1;
+  --paper:#fbfaf7; --card:#ffffff; --line:#e6e3dc;
+  --hot:#c0392b; --hot-bg:#fbeae7;
+  --soon:#9a6b00; --soon-bg:#fdf3dd;
+  --far:#20618a; --far-bg:#e8f1f7;
+  --live:#1c7a5a; --live-bg:#e3f4ec;
+  --dead:#8b91a1; --dead-bg:#f1efea;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:400 16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-text-size-adjust:100%}
+.wrap{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+header{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:18px}
+h1{margin:0;font-size:26px;font-weight:600;letter-spacing:-.01em}
+.sub{margin:6px 0 0;color:var(--ink-2);font-size:14px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 10px}
+input[type=search],select,button{
+  font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);border-radius:8px;-webkit-appearance:none;appearance:none}
+input[type=search]{flex:1 1 200px;min-width:0}
+button{cursor:pointer}
+button:hover{border-color:var(--ink-3)}
+button:active{transform:scale(.99)}
+.count{font-size:13px;color:var(--ink-3);margin:0 0 12px}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--line)}
+.badge{flex:0 0 96px;text-align:center;font-size:13px;font-weight:600;
+  padding:6px 4px;border-radius:8px;line-height:1.25}
+.b-hot{background:var(--hot-bg);color:var(--hot)}
+.b-soon{background:var(--soon-bg);color:var(--soon)}
+.b-far{background:var(--far-bg);color:var(--far)}
+.b-live{background:var(--live-bg);color:var(--live)}
+.b-dead{background:var(--dead-bg);color:var(--dead)}
+.body{min-width:0;flex:1}
+.title{font-size:15px;word-break:break-word}
+.meta{font-size:12.5px;color:var(--ink-3);margin-top:2px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;
+  margin-right:6px;vertical-align:1px}
+.t-red{background:#fbeae7;color:#b03a2e}
+.t-yellow{background:#fdf3dd;color:#8a6100}
+.t-green{background:#e3f4ec;color:#186b4f}
+.t-none{background:#f1efea;color:#6b7180}
+.msg{color:var(--ink-3);font-size:14px;padding:24px 0}
+.err{color:var(--hot);font-size:14px;padding:16px;background:var(--hot-bg);border-radius:8px}
+.err code{font-size:12.5px;word-break:break-all}
+footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
+@media (max-width:480px){
+  .wrap{padding:20px 14px 48px}
+  h1{font-size:22px}
+  .badge{flex-basis:80px;font-size:12px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Lịch POD — đếm ngược</h1>
+  <p class="sub" id="sub">Đang tải từ Google Calendar…</p>
+</header>
+
+<div class="controls">
+  <input type="search" id="q" placeholder="Tìm theo tên, ví dụ: Halloween">
+  <select id="phase">
+    <option value="">Tất cả giai đoạn</option>
+    <option>Lên idea</option>
+    <option>Tăng ads</option>
+    <option>Bán mạnh</option>
+    <option selected>Tắt quảng cáo</option>
+    <option>Hạ giá</option>
+    <option>Collect data</option>
+    <option>Khác</option>
+  </select>
+  <button id="sort">Gần nhất trước ↑</button>
+  <button id="reload">Tải lại</button>
+</div>
+
+<p class="count" id="count"></p>
+<ul id="list"></ul>
+
+<footer id="foot"></footer>
+
+</div>
+
+<script>
+// ==== Dán link web app của Apps Script vào đây ====
+var API_URL = "https://script.google.com/macros/s/AKfycbxpnSbkikGLdH0F2BPSTCMeV0EdVei0IVQYiqfKg6lekZarOxgm8CqPfjAIhsr09P_a2Q/exec";
+
+// Cache trong trình duyệt, tính bằng phút. Đặt 0 nếu muốn luôn gọi mới.
+var CACHE_MINUTES = 30;
+
+(function(){
+  var asc = true, DATA = [];
+  var today = new Date(); today.setHours(0,0,0,0);
+
+  var q = document.getElementById("q"),
+      ph = document.getElementById("phase"),
+      btn = document.getElementById("sort"),
+      reload = document.getElementById("reload"),
+      list = document.getElementById("list"),
+      cnt = document.getElementById("count"),
+      sub = document.getElementById("sub"),
+      foot = document.getElementById("foot");
+
+  function parse(d){ var p = d.split("-"); return new Date(+p[0], +p[1]-1, +p[2]); }
+  function diff(d){ return Math.round((parse(d) - today) / 86400000); }
+  function vn(d){ var p = d.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; }
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+  function phaseOf(t){
+    var s = t.toLowerCase();
+    if (s.indexOf("lên idea") > -1) return "Lên idea";
+    if (s.indexOf("tăng ads") > -1 || s.indexOf("chạy quảng cáo") > -1) return "Tăng ads";
+    if (s.indexOf("bán mạnh") > -1) return "Bán mạnh";
+    if (s.indexOf("tắt quảng cáo") > -1) return "Tắt quảng cáo";
+    if (s.indexOf("hạ giá") > -1) return "Hạ giá";
+    if (s.indexOf("collect data") > -1) return "Collect data";
+    return "Khác";
+  }
+
+  function state(ev){
+    var n = diff(ev.s);
+    if (ev.e && n <= 0 && diff(ev.e) >= 0) return {k:"live", n:n, label:"Đang chạy"};
+    if (n < 0) return {k:"dead", n:n, label:Math.abs(n) + " ngày trước"};
+    if (n === 0) return {k:"hot", n:0, label:"Hôm nay"};
+    if (n <= 7) return {k:"hot", n:n, label:"còn " + n + " ngày"};
+    if (n <= 30) return {k:"soon", n:n, label:"còn " + n + " ngày"};
+    return {k:"far", n:n, label:"còn " + n + " ngày"};
+  }
+
+  function render(){
+    var term = q.value.trim().toLowerCase(), pick = ph.value;
+
+    var rows = DATA.map(function(ev){
+      return { ev: ev, st: state(ev), phase: phaseOf(ev.t) };
+    }).filter(function(r){
+      if (term && r.ev.t.toLowerCase().indexOf(term) < 0) return false;
+      if (pick && r.phase !== pick) return false;
+      return true;
+    }).sort(function(a,b){ return asc ? a.st.n - b.st.n : b.st.n - a.st.n; });
+
+    cnt.textContent = rows.length + " sự kiện";
+
+    if (!rows.length){
+      list.innerHTML = '<li class="msg">Không có sự kiện nào khớp. Thử xoá bớt bộ lọc.</li>';
+      return;
+    }
+
+    list.innerHTML = rows.map(function(r){
+      var ev = r.ev, st = r.st;
+      var tag = ev.c ? '<span class="tag t-' + esc(ev.c) + '">' + esc(ev.c) + '</span>'
+                     : '<span class="tag t-none">—</span>';
+      var meta = vn(ev.s) + (ev.e ? " → " + vn(ev.e) : "") + (ev.time ? " · " + esc(ev.time) : "");
+      return '<li>' +
+        '<span class="badge b-' + st.k + '">' + st.label + '</span>' +
+        '<span class="body"><span class="title">' + tag + esc(ev.t) + '</span>' +
+        '<span class="meta">' + meta + '</span></span></li>';
+    }).join("");
+  }
+
+  function cacheGet(){
+    if (!CACHE_MINUTES) return null;
+    try {
+      var raw = localStorage.getItem("podcal");
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (Date.now() - o.at > CACHE_MINUTES * 60000) return null;
+      return o;
+    } catch(e){ return null; }
+  }
+
+  function cacheSet(data){
+    try { localStorage.setItem("podcal", JSON.stringify({at: Date.now(), data: data})); }
+    catch(e){}
+  }
+
+  function apply(data, cached){
+    DATA = data.events || [];
+    sub.textContent = "Số ngày còn lại tính theo hôm nay · dữ liệu " +
+      (cached ? "từ bộ nhớ tạm" : "vừa tải") +
+      (data.updated ? " (" + vn(data.updated) + ")" : "");
+    foot.textContent = "Nguồn: Google Calendar qua Apps Script.";
+    render();
+  }
+
+  function load(force){
+    if (API_URL.indexOf("PASTE_YOUR") > -1){
+      list.innerHTML = '<li class="err">Chưa cấu hình. Mở file này, tìm dòng ' +
+        '<code>var API_URL</code> ở đầu thẻ script và dán link web app Apps Script vào.</li>';
+      sub.textContent = "Chưa kết nối lịch";
+      return;
+    }
+
+    if (!force){
+      var c = cacheGet();
+      if (c){ apply(c.data, true); return; }
+    }
+
+    list.innerHTML = '<li class="msg">Đang tải…</li>';
+
+    // JSONP: nạp API như một file script để tránh lỗi CORS
+    var name = "__podcal_" + Date.now();
+    var script = document.createElement("script");
+    var done = false;
+
+    var timer = setTimeout(function(){
+      if (done) return;
+      done = true;
+      cleanup();
+      fail(new Error("Quá thời gian chờ (15 giây)"));
+    }, 15000);
+
+    function cleanup(){
+      clearTimeout(timer);
+      try { delete window[name]; } catch(e){ window[name] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    function fail(err){
+      sub.textContent = "Không tải được lịch";
+      var c = cacheGet();
+      if (c){ apply(c.data, true); return; }
+      list.innerHTML = '<li class="err">Không gọi được API. Kiểm tra: web app đã deploy ở chế độ ' +
+        '<b>Anyone</b> chưa, và link có đuôi <code>/exec</code> không.<br><br>Lỗi: <code>' +
+        esc(err.message) + '</code></li>';
+    }
+
+    window[name] = function(data){
+      if (done) return;
+      done = true;
+      cleanup();
+      cacheSet(data);
+      apply(data, false);
+    };
+
+    script.onerror = function(){
+      if (done) return;
+      done = true;
+      cleanup();
+      fail(new Error("Không nạp được script từ API_URL"));
+    };
+
+    script.src = API_URL + (API_URL.indexOf("?") > -1 ? "&" : "?") +
+      "callback=" + name + "&_=" + Date.now();
+    document.head.appendChild(script);
+  }
+
+  btn.addEventListener("click", function(){
+    asc = !asc;
+    btn.textContent = asc ? "Gần nhất trước ↑" : "Xa nhất trước ↓";
+    render();
+  });
+  reload.addEventListener("click", function(){ load(true); });
+  q.addEventListener("input", render);
+  ph.addEventListener("change", render);
+
+  load(false);
+})();
+</script>
+</body>
+</html>
