@@ -19,6 +19,7 @@ body{margin:0;background:var(--paper);color:var(--ink);
   font:400 16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   -webkit-text-size-adjust:100%}
 .wrap{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+.wrap.wide{max-width:1560px}
 header{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:18px}
 h1{margin:0;font-size:26px;font-weight:600;letter-spacing:-.01em}
 .sub{margin:6px 0 0;color:var(--ink-2);font-size:14px}
@@ -54,6 +55,43 @@ li{display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px
 .err{color:var(--hot);font-size:14px;padding:16px;background:var(--hot-bg);border-radius:8px}
 .err code{font-size:12.5px;word-break:break-all}
 footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
+
+/* ==== Tab ==== */
+.tabs{display:flex;gap:6px;margin:16px 0 4px;border-bottom:1px solid var(--line)}
+.tab{font:inherit;font-size:14px;font-weight:600;padding:9px 16px;cursor:pointer;
+  background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--ink-3);border-radius:0}
+.tab:hover{color:var(--ink-2);border-color:var(--line)}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+
+/* ==== Tab áo Merch ==== */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{border:none;border-radius:0;padding:9px 14px;background:none;color:var(--ink-2);font-size:14px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--far-bg);color:var(--far);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin-top:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  overflow:hidden;display:flex;flex-direction:column}
+.thumb{position:relative;background:#f4f2ee;aspect-ratio:342/347}
+.thumb img{width:100%;height:100%;object-fit:contain;display:block}
+.save{position:absolute;top:6px;right:6px;width:26px;height:26px;padding:0;
+  border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.92);
+  font-size:15px;line-height:1;color:var(--ink-3);display:flex;align-items:center;justify-content:center}
+.save.on{background:var(--hot);border-color:var(--hot);color:#fff}
+.info{padding:9px 10px 11px;display:flex;flex-direction:column;gap:3px}
+.rank{color:var(--live);font-weight:700;font-size:15.5px;letter-spacing:-.01em}
+.m-title{font-size:12.5px;line-height:1.35;color:var(--far);text-decoration:none;word-break:break-word}
+.m-title:hover{text-decoration:underline}
+.m-row{font-size:11.5px;color:var(--ink-2);word-break:break-word}
+.m-row b{color:var(--ink);font-weight:600}
+.asin{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-weight:600;color:var(--ink);font-size:11.5px}
+.copy{border:none;background:none;padding:0 4px;font-size:12px;color:var(--ink-3);cursor:pointer}
+.copy:hover{color:var(--ink)}
+.age{font-size:11px;color:var(--ink-3);margin-top:2px}
+@media (max-width:1300px){ .grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
+@media (max-width:900px){  .grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:620px){  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px} }
 @media (max-width:480px){
   .wrap{padding:20px 14px 48px}
   h1{font-size:22px}
@@ -68,6 +106,13 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
   <h1>Lịch POD — đếm ngược</h1>
   <p class="sub" id="sub">Đang tải từ Google Calendar…</p>
 </header>
+
+<div class="tabs">
+  <button class="tab on" data-panel="cal">Lịch POD</button>
+  <button class="tab" data-panel="merch">Áo Merch</button>
+</div>
+
+<section id="panel-cal">
 
 <div class="controls">
   <input type="search" id="q" placeholder="Tìm theo tên, ví dụ: Halloween">
@@ -89,6 +134,27 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 <ul id="list"></ul>
 
 <footer id="foot"></footer>
+
+</section>
+
+<section id="panel-merch" hidden>
+
+<div class="controls">
+  <input type="search" id="mq" placeholder="Tìm theo tiêu đề, brand hoặc ASIN">
+  <span class="seg" id="msort">
+    <button class="on" data-by="rank">Rank</button>
+    <button data-by="date">Ngày thêm</button>
+  </span>
+  <button id="mfav">Chỉ đã lưu</button>
+  <button id="mreload">Tải lại</button>
+</div>
+
+<p class="count" id="mcount"></p>
+<div class="grid" id="mgrid"></div>
+
+<footer id="mfoot"></footer>
+
+</section>
 
 </div>
 
@@ -266,6 +332,259 @@ var CACHE_MINUTES = 30;
   ph.addEventListener("change", render);
 
   load(false);
+})();
+
+
+// ==== Tab áo Merch ====
+(function(){
+  var FAV_KEY = "podmerch_fav", CACHE_KEY = "podmerch_data";
+  var MERCH_CACHE_MINUTES = 60;
+
+  var DATA = [], sortBy = "rank", favOnly = false, fav = {};
+
+  var q = document.getElementById("mq"),
+      seg = document.getElementById("msort"),
+      favBtn = document.getElementById("mfav"),
+      reload = document.getElementById("mreload"),
+      grid = document.getElementById("mgrid"),
+      cnt = document.getElementById("mcount"),
+      foot = document.getElementById("mfoot");
+
+  var today = new Date(); today.setHours(0,0,0,0);
+
+  function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+  function num(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
+  function ageOf(d){
+    if (!d) return "";
+    var p = d.split("-");
+    if (p.length < 3) return "";
+    var n = Math.round((today - new Date(+p[0], +p[1]-1, +p[2])) / 86400000);
+    if (n < 0) return "sắp tới";
+    if (n === 0) return "hôm nay";
+    if (n === 1) return "hôm qua";
+    return n + " ngày trước";
+  }
+
+  function dnum(d){
+    if (!d) return 0;
+    var p = d.split("-");
+    return p.length < 3 ? 0 : (+p[0]) * 10000 + (+p[1]) * 100 + (+p[2]);
+  }
+
+  function favLoad(){
+    try {
+      var a = JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
+      for (var i = 0; i < a.length; i++) fav[a[i]] = 1;
+    } catch(e){}
+  }
+
+  function favSave(){
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(Object.keys(fav))); } catch(e){}
+  }
+
+  function render(){
+    var term = q.value.trim().toLowerCase();
+
+    var rows = DATA.filter(function(it){
+      if (favOnly && !fav[it.a]) return false;
+      if (!term) return true;
+      return (it.t + " " + it.b + " " + it.a).toLowerCase().indexOf(term) > -1;
+    }).sort(function(a, b){
+      if (sortBy === "rank") return (a.r || 9e9) - (b.r || 9e9);
+      return dnum(b.d) - dnum(a.d);
+    });
+
+    cnt.textContent = rows.length + " sản phẩm" +
+      (rows.length !== DATA.length ? " / " + DATA.length : "");
+
+    if (!rows.length){
+      grid.innerHTML = '<p class="msg">Không có sản phẩm nào khớp. Thử xoá bớt bộ lọc.</p>';
+      return;
+    }
+
+    grid.innerHTML = rows.map(function(it){
+      var on = fav[it.a] ? " on" : "";
+      var img = it.i
+        ? '<img src="' + esc(it.i) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
+        : '';
+      var asin = it.a
+        ? '<span class="m-row">ASIN: <span class="asin">' + esc(it.a) + '</span>' +
+          '<button class="copy" data-copy="' + esc(it.a) + '" title="Chép ASIN">&#10697;</button></span>'
+        : '';
+      var brand = it.b ? '<span class="m-row">Brand: <b>' + esc(it.b) + '</b></span>' : '';
+
+      return '<article class="card">' +
+        '<div class="thumb">' + img +
+          '<button class="save' + on + '" data-fav="' + esc(it.a) + '" ' +
+          'title="Lưu">&#9829;</button></div>' +
+        '<div class="info">' +
+          '<span class="rank">&#8593; ' + num(it.r || 0) + '</span>' +
+          '<a class="m-title" href="' + esc(it.u) + '" target="_blank" rel="noopener">' +
+            esc(it.t) + '</a>' +
+          asin + brand +
+          '<span class="age">' + esc(ageOf(it.d)) + '</span>' +
+        '</div></article>';
+    }).join("");
+  }
+
+  function cacheGet(){
+    if (!MERCH_CACHE_MINUTES) return null;
+    try {
+      var o = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      if (!o || Date.now() - o.at > MERCH_CACHE_MINUTES * 60000) return null;
+      return o;
+    } catch(e){ return null; }
+  }
+
+  function cacheSet(data){
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({at: Date.now(), data: data})); }
+    catch(e){}
+  }
+
+  function apply(data, cached){
+    if (data.error){ showErr(data.error); return; }
+
+    // Apps Script bản cũ không biết ?type=merch nên trả về data lịch.
+    // Nhận diện để báo đúng bệnh, thay vì hiện "0 sản phẩm".
+    if (!data.items){
+      showErr("Apps Script đang chạy bản cũ, chưa có nhánh dữ liệu áo. " +
+        "Vào Apps Script dán Code.gs mới, điền MERCH_FOLDER_ID, rồi Quản lý bản " +
+        "triển khai → sửa → Phiên bản mới.");
+      return;
+    }
+
+    DATA = data.items;
+    foot.textContent = "Nguồn: " + (data.file || "CSV") + " trên Google Drive qua Apps Script" +
+      (data.updated ? " · cập nhật " + data.updated : "") +
+      (data.maxRank ? " · chỉ lấy rank ≤ " + num(data.maxRank) : "") +
+      (data.skipped ? " (đã bỏ " + num(data.skipped) + "/" + num(data.total) + ")" : "") +
+      (cached ? " · đọc từ bộ nhớ tạm" : "");
+    render();
+  }
+
+  function showErr(msg){
+    // Cho phép gọi lại khi mở tab lần sau. Không có dòng này thì sau một lần
+    // lỗi, cờ loaded vẫn bật và thông báo lỗi nằm lì cho tới khi tải lại trang.
+    loaded = false;
+    grid.innerHTML = '<p class="err">' + esc(msg) + '</p>';
+    cnt.textContent = "";
+  }
+
+  var loaded = false;
+
+  function load(force){
+    if (!force && loaded) return;
+    loaded = true;
+
+    if (!force){
+      var c = cacheGet();
+      if (c){ apply(c.data, true); return; }
+    }
+
+    grid.innerHTML = '<p class="msg">Đang tải…</p>';
+
+    // JSONP: nạp API như một file script để tránh lỗi CORS
+    var name = "__podmerch_" + Date.now();
+    var script = document.createElement("script");
+    var done = false;
+
+    var timer = setTimeout(function(){
+      if (done) return;
+      done = true; cleanup();
+      fail("Quá thời gian chờ (30 giây).");
+    }, 30000);
+
+    function cleanup(){
+      clearTimeout(timer);
+      try { delete window[name]; } catch(e){ window[name] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    function fail(msg){
+      var c = cacheGet();
+      if (c){ apply(c.data, true); return; }
+      loaded = false;
+      showErr("Không tải được data áo. " + msg +
+        " Kiểm tra web app đã deploy chế độ Anyone và Code.gs đã điền MERCH_FOLDER_ID chưa.");
+    }
+
+    window[name] = function(data){
+      if (done) return;
+      done = true; cleanup();
+      if (!data.error) cacheSet(data);
+      apply(data, false);
+    };
+
+    script.onerror = function(){
+      if (done) return;
+      done = true; cleanup();
+      fail("Không nạp được script từ API_URL.");
+    };
+
+    script.src = API_URL + (API_URL.indexOf("?") > -1 ? "&" : "?") +
+      "type=merch&callback=" + name + "&_=" + Date.now();
+    document.head.appendChild(script);
+  }
+
+  grid.addEventListener("click", function(e){
+    var f = e.target.closest ? e.target.closest("[data-fav]") : null;
+    if (f){
+      var id = f.getAttribute("data-fav");
+      if (fav[id]) delete fav[id]; else fav[id] = 1;
+      favSave();
+      f.className = "save" + (fav[id] ? " on" : "");
+      if (favOnly) render();
+      return;
+    }
+    var c = e.target.closest ? e.target.closest("[data-copy]") : null;
+    if (c && navigator.clipboard){
+      navigator.clipboard.writeText(c.getAttribute("data-copy"));
+      var old = c.innerHTML;
+      c.innerHTML = "&#10003;";
+      setTimeout(function(){ c.innerHTML = old; }, 1000);
+    }
+  });
+
+  seg.addEventListener("click", function(e){
+    var b = e.target.closest ? e.target.closest("[data-by]") : null;
+    if (!b) return;
+    sortBy = b.getAttribute("data-by");
+    var all = seg.querySelectorAll("button");
+    for (var i = 0; i < all.length; i++) all[i].className = (all[i] === b) ? "on" : "";
+    render();
+  });
+
+  favBtn.addEventListener("click", function(){
+    favOnly = !favOnly;
+    favBtn.textContent = favOnly ? "Đang lọc: đã lưu" : "Chỉ đã lưu";
+    render();
+  });
+
+  reload.addEventListener("click", function(){ load(true); });
+  q.addEventListener("input", render);
+
+  favLoad();
+
+  // Chuyển tab — chỉ tải data áo khi mở tab lần đầu
+  var wrap = document.querySelector(".wrap"),
+      tabs = document.querySelectorAll(".tab"),
+      panels = { cal: document.getElementById("panel-cal"),
+                 merch: document.getElementById("panel-merch") };
+
+  for (var i = 0; i < tabs.length; i++){
+    tabs[i].addEventListener("click", function(){
+      var key = this.getAttribute("data-panel");
+      for (var j = 0; j < tabs.length; j++)
+        tabs[j].className = (tabs[j] === this) ? "tab on" : "tab";
+      panels.cal.hidden = (key !== "cal");
+      panels.merch.hidden = (key !== "merch");
+      wrap.className = (key === "merch") ? "wrap wide" : "wrap";
+      if (key === "merch") load(false);
+    });
+  }
 })();
 </script>
 </body>
