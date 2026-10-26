@@ -187,6 +187,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 </div>
 
 <p class="excl" id="mexcl" hidden></p>
+<p class="count" id="mlistnote" hidden></p>
 <p class="count" id="mcount"></p>
 <div class="grid" id="mgrid"></div>
 
@@ -742,6 +743,7 @@ var CACHE_MINUTES = 30;
       if (LISTS[i].n.toLowerCase() === name.toLowerCase()){ idx = i; break; }
     if (idx < 0){ LISTS.push({n: name, a: []}); idx = LISTS.length - 1; }
     if (LISTS[idx].a.indexOf(pickAsin) < 0) LISTS[idx].a.push(pickAsin);
+    syncOp("add", LISTS[idx].n, pickAsin);
     afterListChange();
     if (pick) drawPick();
   }
@@ -762,8 +764,96 @@ var CACHE_MINUTES = 30;
     var k = l.a.indexOf(pickAsin);
     if (e.target.checked && k < 0) l.a.push(pickAsin);
     if (!e.target.checked && k > -1) l.a.splice(k, 1);
+    syncOp(e.target.checked ? "add" : "remove", l.n, pickAsin);
     afterListChange();
   });
+
+  // ==== Đồng bộ list với Google Sheet "Merch Favorite List" qua Apps Script ====
+  // Giao diện đổi ngay khi bấm; các thao tác được gửi lần lượt từng cái một để server
+  // xử lý đúng thứ tự, rồi lấy trạng thái server trả về làm chuẩn.
+  var SYNCED_KEY = "podmerch_lists_synced",
+      noteEl = document.getElementById("mlistnote"),
+      queue = [], busy = false;
+
+  function listNote(msg){ noteEl.textContent = msg || ""; noteEl.hidden = !msg; }
+
+  function jsonp(params, cb){
+    var name = "__podlists_" + Date.now() + "_" + Math.floor(Math.random() * 1e6),
+        script = document.createElement("script"), done = false, qs = [];
+    var timer = setTimeout(function(){ finish({error: "Quá thời gian chờ."}); }, 30000);
+    function finish(data){
+      if (done) return;
+      done = true; clearTimeout(timer);
+      try { delete window[name]; } catch(e){ window[name] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
+      cb(data);
+    }
+    window[name] = finish;
+    script.onerror = function(){ finish({error: "Không nạp được API."}); };
+    for (var k in params) qs.push(k + "=" + encodeURIComponent(params[k]));
+    script.src = API_URL + (API_URL.indexOf("?") > -1 ? "&" : "?") + qs.join("&") +
+      "&callback=" + name + "&_=" + Date.now();
+    document.head.appendChild(script);
+  }
+
+  function findItem(asin){
+    for (var i = 0; i < DATA.length; i++) if (DATA[i].a === asin) return DATA[i];
+    return {};
+  }
+
+  function syncOp(op, list, asin){
+    var it = findItem(asin);
+    queue.push({type: "lists", op: op, list: list, a: asin,
+                t: it.t || "", u: it.u || "", i: it.i || ""});
+    pump();
+  }
+
+  function syncGet(){
+    queue.push({type: "lists", op: "get"});
+    pump();
+  }
+
+  function pump(){
+    if (busy || !queue.length) return;
+    busy = true;
+    var params = queue.shift();
+    if (params.op !== "add"){ delete params.t; delete params.u; delete params.i; }
+    jsonp(params, function(data){
+      busy = false;
+      if (params.op === "get") firstSync(data);
+      // Còn thao tác đang chờ thì chưa lấy kết quả này, kẻo đè mất thay đổi vừa bấm
+      if (!queue.length || !data || !data.lists) fromServer(data);
+      pump();
+    });
+  }
+
+  // Lần đầu nối được Sheet mà Sheet còn trống: đẩy các list đang có trên trình duyệt lên
+  function firstSync(data){
+    if (!data || !data.lists) return;
+    var flag = null;
+    try { flag = localStorage.getItem(SYNCED_KEY); localStorage.setItem(SYNCED_KEY, "1"); } catch(e){}
+    if (flag || data.lists.length) return;
+    for (var i = 0; i < LISTS.length; i++)
+      for (var j = 0; j < LISTS[i].a.length; j++) syncOp("add", LISTS[i].n, LISTS[i].a[j]);
+  }
+
+  function fromServer(data){
+    if (!data || !data.lists){
+      listNote("Chưa đồng bộ Google Sheet — list đang lưu tạm trên trình duyệt này. " +
+        (data && data.error ? "(" + data.error + ")" : "(Apps Script chưa deploy bản mới.)"));
+      return;
+    }
+    listNote("");
+    LISTS = data.lists;
+    listsSave();
+    fillListSel();
+    var hearts = grid.querySelectorAll("[data-fav]");
+    for (var i = 0; i < hearts.length; i++)
+      hearts[i].className = "save" + (inAnyList(hearts[i].getAttribute("data-fav")) ? " on" : "");
+    // Bảng chọn đang mở: vẽ lại ô tick, trừ khi user đang gõ dở tên list mới
+    if (pick && !pick.querySelector("input[type=text]").value) drawPick();
+    if (view !== "" && !pick) render();
+  }
 
   document.addEventListener("keydown", function(e){
     if (!pick) return;
@@ -781,6 +871,7 @@ var CACHE_MINUTES = 30;
 
   listsLoad();
   fillListSel();
+  syncGet();
 
   // Chuyển tab — chỉ tải data áo khi mở tab lần đầu
   var wrap = document.querySelector(".wrap"),
