@@ -107,6 +107,9 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .copy{border:none;background:none;padding:0 4px;font-size:12px;color:var(--ink-3);cursor:pointer}
 .copy:hover{color:var(--ink)}
 .age{font-size:11px;color:var(--ink-3);margin-top:2px}
+.excl{font-size:12.5px;color:var(--ink-2);background:var(--card);border:1px solid var(--line);
+  border-radius:8px;padding:8px 12px;margin:8px 0 4px}
+.excl b{color:var(--ink)}
 @media (max-width:1300px){ .grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
 @media (max-width:900px){  .grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
 @media (max-width:620px){  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px} }
@@ -173,6 +176,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
   <button id="mreload">Tải lại</button>
 </div>
 
+<p class="excl" id="mexcl" hidden></p>
 <p class="count" id="mcount"></p>
 <div class="grid" id="mgrid"></div>
 
@@ -364,6 +368,11 @@ var CACHE_MINUTES = 30;
   var FAV_KEY = "podmerch_fav", CACHE_KEY = "podmerch_data";
   var MERCH_CACHE_MINUTES = 60;
 
+  // Áo có tiêu đề hoặc brand chứa các từ khoá này bị loại khỏi lưới và dải 6 áo
+  var EXCLUDE_KEYWORDS = ["Jeff Dunham", "Disney", "Marvel", "Harry Potter", "Dr. Seuss",
+    "Hello Kitty", "House of 1000 Corpses", "SpongeBob", "Schoolhouse Rock", "Sesame Street",
+    "Coca-Cola", "Project Hail Mary", "Peanuts Store"];
+
   var DATA = [], sortBy = "rank", favOnly = false, fav = {};
   var topReady = false, curTab = "cal";
 
@@ -373,7 +382,8 @@ var CACHE_MINUTES = 30;
       reload = document.getElementById("mreload"),
       grid = document.getElementById("mgrid"),
       cnt = document.getElementById("mcount"),
-      foot = document.getElementById("mfoot");
+      foot = document.getElementById("mfoot"),
+      exclBox = document.getElementById("mexcl");
 
   var today = new Date(); today.setHours(0,0,0,0);
 
@@ -397,6 +407,21 @@ var CACHE_MINUTES = 30;
     if (!d) return 0;
     var p = d.split("-");
     return p.length < 3 ? 0 : (+p[0]) * 10000 + (+p[1]) * 100 + (+p[2]);
+  }
+
+  // Chuẩn hoá để so khớp theo nguyên từ, bỏ qua hoa/thường và dấu câu:
+  // "Dr. Seuss" và "dr seuss" cùng thành " dr seuss ".
+  function norm(s){
+    return " " + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+  }
+
+  var EXCLUDE_NORM = EXCLUDE_KEYWORDS.map(norm);
+
+  function excluded(it){
+    var text = norm(it.t + " " + it.b);
+    for (var i = 0; i < EXCLUDE_NORM.length; i++)
+      if (text.indexOf(EXCLUDE_NORM[i]) > -1) return true;
+    return false;
   }
 
   function favLoad(){
@@ -516,7 +541,15 @@ var CACHE_MINUTES = 30;
       return;
     }
 
-    DATA = data.items;
+    var removed = 0;
+    DATA = data.items.filter(function(it){
+      if (excluded(it)){ removed++; return false; }
+      return true;
+    });
+    exclBox.innerHTML = "Đã loại trừ các từ khóa này: <b>" +
+      esc(EXCLUDE_KEYWORDS.join(", ")) + "</b>" +
+      " (bỏ " + num(removed) + " sản phẩm)";
+    exclBox.hidden = false;
     renderTop();
     foot.textContent = "Nguồn: " + (data.file || "CSV") + " trên Google Drive qua Apps Script" +
       (data.updated ? " · cập nhật " + data.updated : "") +
