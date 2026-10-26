@@ -118,6 +118,14 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
   border:1px solid var(--line);border-radius:6px}
 .pick-new button{padding:6px 10px;font-size:13px}
 #mfavlist.on{background:var(--hot);border-color:var(--hot);color:#fff;font-weight:600}
+.crumb{display:flex;align-items:center;gap:8px;font-size:15px;margin:4px 0 10px}
+.crumb button{padding:6px 12px;font-size:13.5px}
+.crumb b{font-weight:700}
+.lcard{cursor:pointer;text-align:left;padding:0;font:inherit;width:100%;align-items:stretch;justify-content:flex-start}
+.lcard:hover{border-color:var(--ink-3)}
+.l-name{font-weight:600;font-size:14.5px;color:var(--ink);word-break:break-word}
+.l-cnt{font-size:12.5px;color:var(--ink-3)}
+.gone{font-size:12px;color:var(--ink-3);font-style:italic}
 .excl{font-size:12.5px;color:var(--ink-2);background:var(--card);border:1px solid var(--line);
   border-radius:8px;padding:8px 12px;margin:8px 0 4px}
 .excl b{color:var(--ink)}
@@ -183,13 +191,13 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
     <button class="on" data-by="rank">Rank</button>
     <button data-by="date">Ngày thêm</button>
   </span>
-  <select id="mlist"></select>
   <button id="mfavlist">Danh Sách Favorite</button>
   <button id="mreload">Tải lại</button>
 </div>
 
 <p class="excl" id="mexcl" hidden></p>
 <p class="count" id="mlistnote" hidden></p>
+<div class="crumb" id="mcrumb" hidden></div>
 <p class="count" id="mcount"></p>
 <div class="grid" id="mgrid"></div>
 
@@ -388,14 +396,17 @@ var CACHE_MINUTES = 30;
     "TEENAGE MUTANT NINJA Store", "Olivia Rodrigo", "Cartoon Network", "Midnight Margaritas",
     "Dolly Parton", "IT Movie", "Brainrot", "Paw Patrol", "One Piece"];
 
-  // LISTS: [{n: tên list, a: [ASIN...]}]. view: "" = tất cả, "*" = mọi list, số = chỉ số list
-  var DATA = [], sortBy = "rank", LISTS = [], view = "";
+  // LISTS: [{n: tên list, a: [ASIN...]}]. INFO: {ASIN: {t, u, i}} lưu kèm khi thả tim, để hiện
+  // được cả áo đã rớt khỏi file data. view: "" = tất cả sản phẩm, "#" = các thẻ list,
+  // số = chỉ số list đang mở.
+  var INFO_KEY = "podmerch_info";
+  var DATA = [], sortBy = "rank", LISTS = [], INFO = {}, view = "";
   var topReady = false, curTab = "cal";
 
   var q = document.getElementById("mq"),
       seg = document.getElementById("msort"),
-      listSel = document.getElementById("mlist"),
       favListBtn = document.getElementById("mfavlist"),
+      crumb = document.getElementById("mcrumb"),
       reload = document.getElementById("mreload"),
       grid = document.getElementById("mgrid"),
       cnt = document.getElementById("mcount"),
@@ -442,6 +453,7 @@ var CACHE_MINUTES = 30;
   }
 
   function listsLoad(){
+    try { INFO = JSON.parse(localStorage.getItem(INFO_KEY) || "{}") || {}; } catch(e){ INFO = {}; }
     try {
       var raw = localStorage.getItem(LISTS_KEY);
       if (raw){ LISTS = JSON.parse(raw) || []; return; }
@@ -452,7 +464,10 @@ var CACHE_MINUTES = 30;
   }
 
   function listsSave(){
-    try { localStorage.setItem(LISTS_KEY, JSON.stringify(LISTS)); } catch(e){}
+    try {
+      localStorage.setItem(LISTS_KEY, JSON.stringify(LISTS));
+      localStorage.setItem(INFO_KEY, JSON.stringify(INFO));
+    } catch(e){}
   }
 
   function inAnyList(asin){
@@ -461,37 +476,69 @@ var CACHE_MINUTES = 30;
     return false;
   }
 
-  function inView(asin){
-    if (view === "") return true;
-    if (view === "*") return inAnyList(asin);
-    var l = LISTS[+view];
-    return !!l && l.a.indexOf(asin) > -1;
+  function findItem(asin){
+    for (var i = 0; i < DATA.length; i++) if (DATA[i].a === asin) return DATA[i];
+    return null;
   }
 
-  // Dựng lại ô chọn list, giữ nguyên lựa chọn hiện tại
-  function fillListSel(){
-    var html = '<option value="">Tất cả sản phẩm</option>' +
-      '<option value="*">Đã lưu (mọi list)</option>';
-    for (var i = 0; i < LISTS.length; i++)
-      html += '<option value="' + i + '">' + esc(LISTS[i].n) + ' (' + LISTS[i].a.length + ')</option>';
-    listSel.innerHTML = html;
-    if (view !== "" && view !== "*" && !LISTS[+view]) view = "";
-    listSel.value = view;
+  // Áo trong một list: lấy từ data hiện tại, áo đã rớt khỏi data thì dựng lại từ INFO
+  function listItems(l){
+    return l.a.map(function(asin){
+      var it = findItem(asin);
+      if (it) return it;
+      var o = INFO[asin] || {};
+      return {a: asin, t: o.t || asin, u: o.u || "https://www.amazon.com/dp/" + asin,
+              i: o.i || "", b: "", d: "", r: 0, gone: true};
+    });
+  }
 
-    // Nút "Danh Sách Favorite": đếm mẫu đã lưu, không đếm trùng giữa các list
-    var seen = {}, n = 0;
-    for (var j = 0; j < LISTS.length; j++)
-      for (var k = 0; k < LISTS[j].a.length; k++)
-        if (!seen[LISTS[j].a[k]]){ seen[LISTS[j].a[k]] = 1; n++; }
-    favListBtn.textContent = "Danh Sách Favorite (" + n + ")";
-    favListBtn.className = (view === "*") ? "on" : "";
+  // Nút "Danh Sách Favorite" và thanh quay lại, theo view hiện tại
+  function updateFav(){
+    if (view !== "" && view !== "#" && !LISTS[+view]) view = "#";
+    favListBtn.textContent = "Danh Sách Favorite (" + LISTS.length + ")";
+    favListBtn.className = (view !== "") ? "on" : "";
+
+    if (view === "" || view === "#"){ crumb.hidden = true; return; }
+    crumb.innerHTML = '<button data-back="1">&#8592; Danh sách Favorite</button>' +
+      '<span>/</span><b>' + esc(LISTS[+view].n) + '</b>';
+    crumb.hidden = false;
+  }
+
+  // Các thẻ list (view "#"): ảnh mẫu đầu tiên, tên, số mẫu
+  function renderLists(term){
+    var idx = [];
+    for (var i = 0; i < LISTS.length; i++)
+      if (!term || LISTS[i].n.toLowerCase().indexOf(term) > -1) idx.push(i);
+
+    cnt.textContent = idx.length + " list";
+    if (!idx.length){
+      grid.innerHTML = '<p class="msg">' + (LISTS.length
+        ? "Không có list nào khớp."
+        : "Chưa có list nào. Bấm trái tim trên một mẫu áo để tạo list đầu tiên.") + '</p>';
+      return;
+    }
+
+    grid.innerHTML = idx.map(function(i){
+      // Ảnh đại diện: mẫu đầu tiên trong list có ảnh
+      var l = LISTS[i], items = listItems(l), src = "";
+      for (var k = 0; k < items.length && !src; k++) src = items[k].i;
+      var img = src
+        ? '<img src="' + esc(src) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
+        : '';
+      return '<button class="card lcard" data-open="' + i + '">' +
+        '<div class="thumb">' + img + '</div>' +
+        '<div class="info"><span class="l-name">' + esc(l.n) + '</span>' +
+        '<span class="l-cnt">' + l.a.length + ' mẫu</span></div></button>';
+    }).join("");
   }
 
   function render(){
     var term = q.value.trim().toLowerCase();
+    updateFav();
+    if (view === "#"){ renderLists(term); return; }
 
-    var rows = DATA.filter(function(it){
-      if (!inView(it.a)) return false;
+    var src = (view === "") ? DATA : listItems(LISTS[+view]);
+    var rows = src.filter(function(it){
       if (!term) return true;
       return (it.t + " " + it.b + " " + it.a).toLowerCase().indexOf(term) > -1;
     }).sort(function(a, b){
@@ -500,10 +547,12 @@ var CACHE_MINUTES = 30;
     });
 
     cnt.textContent = rows.length + " sản phẩm" +
-      (rows.length !== DATA.length ? " / " + DATA.length : "");
+      (rows.length !== src.length ? " / " + src.length : "");
 
     if (!rows.length){
-      grid.innerHTML = '<p class="msg">Không có sản phẩm nào khớp. Thử xoá bớt bộ lọc.</p>';
+      grid.innerHTML = '<p class="msg">' + (src.length
+        ? "Không có sản phẩm nào khớp. Thử xoá bớt bộ lọc."
+        : "List này chưa có mẫu nào.") + '</p>';
       return;
     }
 
@@ -523,7 +572,9 @@ var CACHE_MINUTES = 30;
           '<button class="save' + on + '" data-fav="' + esc(it.a) + '" ' +
           'title="Lưu vào list">&#9829;</button></div>' +
         '<div class="info">' +
-          '<span class="rank">&#8593; ' + num(it.r || 0) + '</span>' +
+          (it.gone
+            ? '<span class="gone">Không còn trong data hiện tại</span>'
+            : '<span class="rank">&#8593; ' + num(it.r || 0) + '</span>') +
           '<a class="m-title" href="' + esc(it.u) + '" target="_blank" rel="noopener">' +
             esc(it.t) + '</a>' +
           asin + brand +
@@ -676,6 +727,14 @@ var CACHE_MINUTES = 30;
   }
 
   grid.addEventListener("click", function(e){
+    // Bấm thẻ list → mở list đó
+    var lc = e.target.closest ? e.target.closest("[data-open]") : null;
+    if (lc){
+      view = lc.getAttribute("data-open");
+      q.value = "";
+      render();
+      return;
+    }
     var f = e.target.closest ? e.target.closest("[data-fav]") : null;
     if (f){
       e.stopPropagation();
@@ -741,7 +800,7 @@ var CACHE_MINUTES = 30;
   function afterListChange(){
     listsSave();
     if (pickBtn) pickBtn.className = "save" + (inAnyList(pickAsin) ? " on" : "");
-    fillListSel();
+    updateFav();
     if (view !== ""){ closePick(); render(); }
   }
 
@@ -807,15 +866,13 @@ var CACHE_MINUTES = 30;
     document.head.appendChild(script);
   }
 
-  function findItem(asin){
-    for (var i = 0; i < DATA.length; i++) if (DATA[i].a === asin) return DATA[i];
-    return {};
-  }
-
   function syncOp(op, list, asin){
     var it = findItem(asin);
+    // Nhớ tiêu đề/link/ảnh để sau này áo rớt khỏi data vẫn hiện được trong list
+    if (it && op === "add") INFO[asin] = {t: it.t, u: it.u, i: it.i};
+    var o = INFO[asin] || {};
     queue.push({type: "lists", op: op, list: list, a: asin,
-                t: it.t || "", u: it.u || "", i: it.i || ""});
+                t: o.t || "", u: o.u || "", i: o.i || ""});
     pump();
   }
 
@@ -856,8 +913,9 @@ var CACHE_MINUTES = 30;
     }
     listNote("");
     LISTS = data.lists;
+    for (var a in (data.info || {})) if (!INFO[a]) INFO[a] = data.info[a];
     listsSave();
-    fillListSel();
+    updateFav();
     var hearts = grid.querySelectorAll("[data-fav]");
     for (var i = 0; i < hearts.length; i++)
       hearts[i].className = "save" + (inAnyList(hearts[i].getAttribute("data-fav")) ? " on" : "");
@@ -872,24 +930,22 @@ var CACHE_MINUTES = 30;
     else if (e.key === "Enter" && pick.contains(e.target) && e.target.type === "text") createList();
   });
 
-  listSel.addEventListener("change", function(){
-    view = listSel.value;
-    favListBtn.className = (view === "*") ? "on" : "";
+  // Bấm nút: tất cả sản phẩm ⇄ các thẻ list
+  favListBtn.addEventListener("click", function(){
+    view = (view === "") ? "#" : "";
+    q.value = "";
     render();
   });
 
-  favListBtn.addEventListener("click", function(){
-    view = (view === "*") ? "" : "*";
-    listSel.value = view;
-    favListBtn.className = (view === "*") ? "on" : "";
-    render();
+  crumb.addEventListener("click", function(e){
+    if (e.target.closest && e.target.closest("[data-back]")){ view = "#"; q.value = ""; render(); }
   });
 
   reload.addEventListener("click", function(){ load(true); });
   q.addEventListener("input", render);
 
   listsLoad();
-  fillListSel();
+  updateFav();
   syncGet();
 
   // Chuyển tab — chỉ tải data áo khi mở tab lần đầu
