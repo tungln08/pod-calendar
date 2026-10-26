@@ -117,6 +117,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .pick-new input{flex:1 1 auto;min-width:0;font:inherit;font-size:13px;padding:6px 8px;
   border:1px solid var(--line);border-radius:6px}
 .pick-new button{padding:6px 10px;font-size:13px}
+#mfavlist.on{background:var(--hot);border-color:var(--hot);color:#fff;font-weight:600}
 .excl{font-size:12.5px;color:var(--ink-2);background:var(--card);border:1px solid var(--line);
   border-radius:8px;padding:8px 12px;margin:8px 0 4px}
 .excl b{color:var(--ink)}
@@ -183,6 +184,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
     <button data-by="date">Ngày thêm</button>
   </span>
   <select id="mlist"></select>
+  <button id="mfavlist">Danh Sách Favorite</button>
   <button id="mreload">Tải lại</button>
 </div>
 
@@ -393,6 +395,7 @@ var CACHE_MINUTES = 30;
   var q = document.getElementById("mq"),
       seg = document.getElementById("msort"),
       listSel = document.getElementById("mlist"),
+      favListBtn = document.getElementById("mfavlist"),
       reload = document.getElementById("mreload"),
       grid = document.getElementById("mgrid"),
       cnt = document.getElementById("mcount"),
@@ -474,6 +477,14 @@ var CACHE_MINUTES = 30;
     listSel.innerHTML = html;
     if (view !== "" && view !== "*" && !LISTS[+view]) view = "";
     listSel.value = view;
+
+    // Nút "Danh Sách Favorite": đếm mẫu đã lưu, không đếm trùng giữa các list
+    var seen = {}, n = 0;
+    for (var j = 0; j < LISTS.length; j++)
+      for (var k = 0; k < LISTS[j].a.length; k++)
+        if (!seen[LISTS[j].a[k]]){ seen[LISTS[j].a[k]] = 1; n++; }
+    favListBtn.textContent = "Danh Sách Favorite (" + n + ")";
+    favListBtn.className = (view === "*") ? "on" : "";
   }
 
   function render(){
@@ -863,6 +874,14 @@ var CACHE_MINUTES = 30;
 
   listSel.addEventListener("change", function(){
     view = listSel.value;
+    favListBtn.className = (view === "*") ? "on" : "";
+    render();
+  });
+
+  favListBtn.addEventListener("click", function(){
+    view = (view === "*") ? "" : "*";
+    listSel.value = view;
+    favListBtn.className = (view === "*") ? "on" : "";
     render();
   });
 
