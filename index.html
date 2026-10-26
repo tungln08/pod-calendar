@@ -117,7 +117,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .pick-new input{flex:1 1 auto;min-width:0;font:inherit;font-size:13px;padding:6px 8px;
   border:1px solid var(--line);border-radius:6px}
 .pick-new button{padding:6px 10px;font-size:13px}
-#mfavlist.on{background:var(--hot);border-color:var(--hot);color:#fff;font-weight:600}
+#mfavlist.on,#mhide.on{background:var(--hot);border-color:var(--hot);color:#fff;font-weight:600}
 .crumb{display:flex;align-items:center;gap:8px;font-size:15px;margin:4px 0 10px}
 .crumb button{padding:6px 12px;font-size:13.5px}
 .crumb b{font-weight:700}
@@ -192,6 +192,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
     <button data-by="date">Ngày thêm</button>
   </span>
   <button id="mfavlist">Danh Sách Favorite</button>
+  <button id="mhide">Ẩn áo trong list</button>
   <button id="mreload">Tải lại</button>
 </div>
 
@@ -399,13 +400,15 @@ var CACHE_MINUTES = 30;
   // LISTS: [{n: tên list, a: [ASIN...]}]. INFO: {ASIN: {t, u, i}} lưu kèm khi thả tim, để hiện
   // được cả áo đã rớt khỏi file data. view: "" = tất cả sản phẩm, "#" = các thẻ list,
   // số = chỉ số list đang mở.
-  var INFO_KEY = "podmerch_info";
-  var DATA = [], sortBy = "rank", LISTS = [], INFO = {}, view = "";
+  // HIDE: tên các list (chữ thường) có áo bị ẩn khỏi lưới tất cả sản phẩm
+  var INFO_KEY = "podmerch_info", HIDE_KEY = "podmerch_hide";
+  var DATA = [], sortBy = "rank", LISTS = [], INFO = {}, view = "", HIDE = [];
   var topReady = false, curTab = "cal";
 
   var q = document.getElementById("mq"),
       seg = document.getElementById("msort"),
       favListBtn = document.getElementById("mfavlist"),
+      hideBtn = document.getElementById("mhide"),
       crumb = document.getElementById("mcrumb"),
       reload = document.getElementById("mreload"),
       grid = document.getElementById("mgrid"),
@@ -453,6 +456,7 @@ var CACHE_MINUTES = 30;
   }
 
   function listsLoad(){
+    try { HIDE = JSON.parse(localStorage.getItem(HIDE_KEY) || "[]") || []; } catch(e){ HIDE = []; }
     try { INFO = JSON.parse(localStorage.getItem(INFO_KEY) || "{}") || {}; } catch(e){ INFO = {}; }
     try {
       var raw = localStorage.getItem(LISTS_KEY);
@@ -481,6 +485,11 @@ var CACHE_MINUTES = 30;
     return null;
   }
 
+  // Các list đang được chọn ẩn (chỉ tính list còn tồn tại)
+  function hiddenLists(){
+    return LISTS.filter(function(l){ return HIDE.indexOf(l.n.toLowerCase()) > -1; });
+  }
+
   // Áo trong một list: lấy từ data hiện tại, áo đã rớt khỏi data thì dựng lại từ INFO
   function listItems(l){
     return l.a.map(function(asin){
@@ -497,6 +506,10 @@ var CACHE_MINUTES = 30;
     if (view !== "" && view !== "#" && !LISTS[+view]) view = "#";
     favListBtn.textContent = "Danh Sách Favorite (" + LISTS.length + ")";
     favListBtn.className = (view !== "") ? "on" : "";
+    var nh = hiddenLists().length;
+    hideBtn.textContent = "Ẩn áo trong list" + (nh ? " (" + nh + ")" : "");
+    hideBtn.className = nh ? "on" : "";
+    hideBtn.hidden = (view !== "");
 
     if (view === "" || view === "#"){ crumb.hidden = true; return; }
     crumb.innerHTML = '<button data-back="1">&#8592; Danh sách Favorite</button>' +
@@ -538,6 +551,12 @@ var CACHE_MINUTES = 30;
     if (view === "#"){ renderLists(term); return; }
 
     var src = (view === "") ? DATA : listItems(LISTS[+view]);
+    var hl = (view === "") ? hiddenLists() : [], skip = {}, nHid = 0;
+    hl.forEach(function(l){ l.a.forEach(function(a){ skip[a] = 1; }); });
+    if (hl.length){
+      src = src.filter(function(it){ return !skip[it.a]; });
+      nHid = DATA.length - src.length;
+    }
     var rows = src.filter(function(it){
       if (!term) return true;
       return (it.t + " " + it.b + " " + it.a).toLowerCase().indexOf(term) > -1;
@@ -547,10 +566,12 @@ var CACHE_MINUTES = 30;
     });
 
     cnt.textContent = rows.length + " sản phẩm" +
-      (rows.length !== src.length ? " / " + src.length : "");
+      (rows.length !== src.length ? " / " + src.length : "") +
+      (hl.length ? " · đã ẩn " + nHid + " mẫu thuộc list: " +
+        hl.map(function(l){ return l.n; }).join(", ") : "");
 
     if (!rows.length){
-      grid.innerHTML = '<p class="msg">' + (src.length
+      grid.innerHTML = '<p class="msg">' + (src.length || view === ""
         ? "Không có sản phẩm nào khớp. Thử xoá bớt bộ lọc."
         : "List này chưa có mẫu nào.") + '</p>';
       return;
@@ -738,7 +759,7 @@ var CACHE_MINUTES = 30;
     var f = e.target.closest ? e.target.closest("[data-fav]") : null;
     if (f){
       e.stopPropagation();
-      if (pickBtn === f) closePick(); else openPick(f);
+      if (pickBtn === f) closePickFlush(); else openPick(f);
       return;
     }
     var c = e.target.closest ? e.target.closest("[data-copy]") : null;
@@ -764,6 +785,7 @@ var CACHE_MINUTES = 30;
 
   function openPick(btn){
     closePick();
+    closeHide();
     pickBtn = btn;
     pickAsin = btn.getAttribute("data-fav");
     pick = document.createElement("div");
@@ -802,6 +824,15 @@ var CACHE_MINUTES = 30;
     if (pickBtn) pickBtn.className = "save" + (inAnyList(pickAsin) ? " on" : "");
     updateFav();
     if (view !== ""){ closePick(); render(); }
+    else if (HIDE.length) hideDirty = true;
+  }
+
+  // Áo vừa thả tim vào list đang ẩn: vẽ lại lưới sau khi đóng bảng chọn, không vẽ lúc
+  // bảng còn mở để bảng không mất nút neo
+  var hideDirty = false;
+  function closePickFlush(){
+    closePick();
+    if (hideDirty){ hideDirty = false; render(); }
   }
 
   function createList(){
@@ -824,7 +855,7 @@ var CACHE_MINUTES = 30;
       if (e.target.tagName === "BUTTON") createList();
       return;
     }
-    closePick();
+    closePickFlush();
   });
 
   document.addEventListener("change", function(e){
@@ -921,12 +952,13 @@ var CACHE_MINUTES = 30;
       hearts[i].className = "save" + (inAnyList(hearts[i].getAttribute("data-fav")) ? " on" : "");
     // Bảng chọn đang mở: vẽ lại ô tick, trừ khi user đang gõ dở tên list mới
     if (pick && !pick.querySelector("input[type=text]").value) drawPick();
-    if (view !== "" && !pick) render();
+    if ((view !== "" || HIDE.length) && !pick) render();
+    if (hidePop) drawHide();
   }
 
   document.addEventListener("keydown", function(e){
     if (!pick) return;
-    if (e.key === "Escape") closePick();
+    if (e.key === "Escape") closePickFlush();
     else if (e.key === "Enter" && pick.contains(e.target) && e.target.type === "text") createList();
   });
 
@@ -934,6 +966,57 @@ var CACHE_MINUTES = 30;
   favListBtn.addEventListener("click", function(){
     view = (view === "") ? "#" : "";
     q.value = "";
+    render();
+  });
+
+  // ==== Bảng chọn list cần ẩn khỏi lưới tất cả sản phẩm ====
+  var hidePop = null;
+
+  function drawHide(){
+    var html = '<div class="pick-h">Ẩn các áo thuộc list</div><div class="pick-ls">';
+    if (!LISTS.length) html += '<div class="pick-empty">Chưa có list nào.</div>';
+    for (var i = 0; i < LISTS.length; i++)
+      html += '<label><input type="checkbox" data-hide="' + i + '"' +
+        (HIDE.indexOf(LISTS[i].n.toLowerCase()) > -1 ? " checked" : "") + '>' +
+        esc(LISTS[i].n) + ' (' + LISTS[i].a.length + ')</label>';
+    hidePop.innerHTML = html + '</div>';
+  }
+
+  function closeHide(){
+    if (hidePop && hidePop.parentNode) hidePop.parentNode.removeChild(hidePop);
+    hidePop = null;
+  }
+
+  hideBtn.addEventListener("click", function(e){
+    e.stopPropagation();
+    if (hidePop){ closeHide(); return; }
+    closePickFlush();
+    hidePop = document.createElement("div");
+    hidePop.className = "pick";
+    document.body.appendChild(hidePop);
+    drawHide();
+    var r = hideBtn.getBoundingClientRect(),
+        maxLeft = document.documentElement.clientWidth - hidePop.offsetWidth - 8;
+    hidePop.style.left = (window.scrollX + Math.max(8, Math.min(r.left, maxLeft))) + "px";
+    hidePop.style.top = (window.scrollY + r.bottom + 6) + "px";
+  });
+
+  document.addEventListener("click", function(e){
+    if (hidePop && !hidePop.contains(e.target)) closeHide();
+  });
+
+  document.addEventListener("keydown", function(e){
+    if (hidePop && e.key === "Escape") closeHide();
+  });
+
+  document.addEventListener("change", function(e){
+    if (!hidePop || !hidePop.contains(e.target) || !e.target.hasAttribute("data-hide")) return;
+    var l = LISTS[+e.target.getAttribute("data-hide")];
+    if (!l) return;
+    var key = l.n.toLowerCase(), k = HIDE.indexOf(key);
+    if (e.target.checked && k < 0) HIDE.push(key);
+    if (!e.target.checked && k > -1) HIDE.splice(k, 1);
+    try { localStorage.setItem(HIDE_KEY, JSON.stringify(HIDE)); } catch(err){}
     render();
   });
 
