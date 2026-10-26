@@ -107,6 +107,16 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .copy{border:none;background:none;padding:0 4px;font-size:12px;color:var(--ink-3);cursor:pointer}
 .copy:hover{color:var(--ink)}
 .age{font-size:11px;color:var(--ink-3);margin-top:2px}
+.pick{position:absolute;z-index:50;width:230px;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14);padding:10px 12px;font-size:13.5px}
+.pick-h{font-weight:600;margin-bottom:6px}
+.pick-ls{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.pick-ls label{display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer;word-break:break-word}
+.pick-empty{color:var(--ink-3);font-size:12.5px;padding:2px 0 4px}
+.pick-new{display:flex;gap:6px}
+.pick-new input{flex:1 1 auto;min-width:0;font:inherit;font-size:13px;padding:6px 8px;
+  border:1px solid var(--line);border-radius:6px}
+.pick-new button{padding:6px 10px;font-size:13px}
 .excl{font-size:12.5px;color:var(--ink-2);background:var(--card);border:1px solid var(--line);
   border-radius:8px;padding:8px 12px;margin:8px 0 4px}
 .excl b{color:var(--ink)}
@@ -172,7 +182,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
     <button class="on" data-by="rank">Rank</button>
     <button data-by="date">Ngày thêm</button>
   </span>
-  <button id="mfav">Chỉ đã lưu</button>
+  <select id="mlist"></select>
   <button id="mreload">Tải lại</button>
 </div>
 
@@ -365,7 +375,7 @@ var CACHE_MINUTES = 30;
 
 // ==== Tab áo Merch ====
 (function(){
-  var FAV_KEY = "podmerch_fav", CACHE_KEY = "podmerch_data";
+  var FAV_KEY = "podmerch_fav", LISTS_KEY = "podmerch_lists", CACHE_KEY = "podmerch_data";
   var MERCH_CACHE_MINUTES = 60;
 
   // Áo có tiêu đề hoặc brand chứa các từ khoá này bị loại khỏi lưới và dải 6 áo
@@ -375,12 +385,13 @@ var CACHE_MINUTES = 30;
     "TEENAGE MUTANT NINJA Store", "Olivia Rodrigo", "Cartoon Network", "Midnight Margaritas",
     "Dolly Parton", "IT Movie", "Brainrot", "Paw Patrol", "One Piece"];
 
-  var DATA = [], sortBy = "rank", favOnly = false, fav = {};
+  // LISTS: [{n: tên list, a: [ASIN...]}]. view: "" = tất cả, "*" = mọi list, số = chỉ số list
+  var DATA = [], sortBy = "rank", LISTS = [], view = "";
   var topReady = false, curTab = "cal";
 
   var q = document.getElementById("mq"),
       seg = document.getElementById("msort"),
-      favBtn = document.getElementById("mfav"),
+      listSel = document.getElementById("mlist"),
       reload = document.getElementById("mreload"),
       grid = document.getElementById("mgrid"),
       cnt = document.getElementById("mcount"),
@@ -426,22 +437,49 @@ var CACHE_MINUTES = 30;
     return false;
   }
 
-  function favLoad(){
+  function listsLoad(){
     try {
-      var a = JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
-      for (var i = 0; i < a.length; i++) fav[a[i]] = 1;
-    } catch(e){}
+      var raw = localStorage.getItem(LISTS_KEY);
+      if (raw){ LISTS = JSON.parse(raw) || []; return; }
+      // Bản cũ chỉ có một danh sách yêu thích: chuyển sang list "Đã lưu"
+      var old = JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
+      if (old.length){ LISTS = [{n: "Đã lưu", a: old}]; listsSave(); }
+    } catch(e){ LISTS = []; }
   }
 
-  function favSave(){
-    try { localStorage.setItem(FAV_KEY, JSON.stringify(Object.keys(fav))); } catch(e){}
+  function listsSave(){
+    try { localStorage.setItem(LISTS_KEY, JSON.stringify(LISTS)); } catch(e){}
+  }
+
+  function inAnyList(asin){
+    for (var i = 0; i < LISTS.length; i++)
+      if (LISTS[i].a.indexOf(asin) > -1) return true;
+    return false;
+  }
+
+  function inView(asin){
+    if (view === "") return true;
+    if (view === "*") return inAnyList(asin);
+    var l = LISTS[+view];
+    return !!l && l.a.indexOf(asin) > -1;
+  }
+
+  // Dựng lại ô chọn list, giữ nguyên lựa chọn hiện tại
+  function fillListSel(){
+    var html = '<option value="">Tất cả sản phẩm</option>' +
+      '<option value="*">Đã lưu (mọi list)</option>';
+    for (var i = 0; i < LISTS.length; i++)
+      html += '<option value="' + i + '">' + esc(LISTS[i].n) + ' (' + LISTS[i].a.length + ')</option>';
+    listSel.innerHTML = html;
+    if (view !== "" && view !== "*" && !LISTS[+view]) view = "";
+    listSel.value = view;
   }
 
   function render(){
     var term = q.value.trim().toLowerCase();
 
     var rows = DATA.filter(function(it){
-      if (favOnly && !fav[it.a]) return false;
+      if (!inView(it.a)) return false;
       if (!term) return true;
       return (it.t + " " + it.b + " " + it.a).toLowerCase().indexOf(term) > -1;
     }).sort(function(a, b){
@@ -458,7 +496,7 @@ var CACHE_MINUTES = 30;
     }
 
     grid.innerHTML = rows.map(function(it){
-      var on = fav[it.a] ? " on" : "";
+      var on = inAnyList(it.a) ? " on" : "";
       var img = it.i
         ? '<img src="' + esc(it.i) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
         : '';
@@ -471,7 +509,7 @@ var CACHE_MINUTES = 30;
       return '<article class="card">' +
         '<div class="thumb">' + img +
           '<button class="save' + on + '" data-fav="' + esc(it.a) + '" ' +
-          'title="Lưu">&#9829;</button></div>' +
+          'title="Lưu vào list">&#9829;</button></div>' +
         '<div class="info">' +
           '<span class="rank">&#8593; ' + num(it.r || 0) + '</span>' +
           '<a class="m-title" href="' + esc(it.u) + '" target="_blank" rel="noopener">' +
@@ -628,11 +666,8 @@ var CACHE_MINUTES = 30;
   grid.addEventListener("click", function(e){
     var f = e.target.closest ? e.target.closest("[data-fav]") : null;
     if (f){
-      var id = f.getAttribute("data-fav");
-      if (fav[id]) delete fav[id]; else fav[id] = 1;
-      favSave();
-      f.className = "save" + (fav[id] ? " on" : "");
-      if (favOnly) render();
+      e.stopPropagation();
+      if (pickBtn === f) closePick(); else openPick(f);
       return;
     }
     var c = e.target.closest ? e.target.closest("[data-copy]") : null;
@@ -653,16 +688,99 @@ var CACHE_MINUTES = 30;
     render();
   });
 
-  favBtn.addEventListener("click", function(){
-    favOnly = !favOnly;
-    favBtn.textContent = favOnly ? "Đang lọc: đã lưu" : "Chỉ đã lưu";
+  // ==== Bảng chọn list khi bấm trái tim ====
+  var pick = null, pickBtn = null, pickAsin = "";
+
+  function openPick(btn){
+    closePick();
+    pickBtn = btn;
+    pickAsin = btn.getAttribute("data-fav");
+    pick = document.createElement("div");
+    pick.className = "pick";
+    document.body.appendChild(pick);
+    drawPick();
+    // Canh mép phải bảng theo nút, nhưng không để tràn ra ngoài màn hình
+    var r = btn.getBoundingClientRect(),
+        maxLeft = document.documentElement.clientWidth - pick.offsetWidth - 8;
+    pick.style.left = (window.scrollX + Math.max(8, Math.min(r.right - pick.offsetWidth, maxLeft))) + "px";
+    pick.style.top = (window.scrollY + r.bottom + 6) + "px";
+    if (!LISTS.length) pick.querySelector("input[type=text]").focus();
+  }
+
+  function drawPick(){
+    var html = '<div class="pick-h">Lưu vào list</div><div class="pick-ls">';
+    if (!LISTS.length)
+      html += '<div class="pick-empty">Chưa có list nào — tạo list đầu tiên bên dưới.</div>';
+    for (var i = 0; i < LISTS.length; i++)
+      html += '<label><input type="checkbox" data-li="' + i + '"' +
+        (LISTS[i].a.indexOf(pickAsin) > -1 ? " checked" : "") + '>' + esc(LISTS[i].n) + '</label>';
+    html += '</div><div class="pick-new"><input type="text" placeholder="Tên list mới" maxlength="60">' +
+      '<button type="button">Tạo</button></div>';
+    pick.innerHTML = html;
+  }
+
+  function closePick(){
+    if (pick && pick.parentNode) pick.parentNode.removeChild(pick);
+    pick = null; pickBtn = null; pickAsin = "";
+  }
+
+  // Sau mỗi thay đổi: lưu, tô lại trái tim, cập nhật số mẫu trong ô chọn list.
+  // Đang xem theo list thì lọc lại lưới; nút trái tim cũ bị vẽ lại nên đóng bảng.
+  function afterListChange(){
+    listsSave();
+    if (pickBtn) pickBtn.className = "save" + (inAnyList(pickAsin) ? " on" : "");
+    fillListSel();
+    if (view !== ""){ closePick(); render(); }
+  }
+
+  function createList(){
+    var inp = pick.querySelector("input[type=text]"),
+        name = inp.value.replace(/\s+/g, " ").trim();
+    if (!name){ inp.focus(); return; }
+    var idx = -1;
+    for (var i = 0; i < LISTS.length; i++)
+      if (LISTS[i].n.toLowerCase() === name.toLowerCase()){ idx = i; break; }
+    if (idx < 0){ LISTS.push({n: name, a: []}); idx = LISTS.length - 1; }
+    if (LISTS[idx].a.indexOf(pickAsin) < 0) LISTS[idx].a.push(pickAsin);
+    afterListChange();
+    if (pick) drawPick();
+  }
+
+  document.addEventListener("click", function(e){
+    if (!pick) return;
+    if (pick.contains(e.target)){
+      if (e.target.tagName === "BUTTON") createList();
+      return;
+    }
+    closePick();
+  });
+
+  document.addEventListener("change", function(e){
+    if (!pick || !pick.contains(e.target) || !e.target.hasAttribute("data-li")) return;
+    var l = LISTS[+e.target.getAttribute("data-li")];
+    if (!l) return;
+    var k = l.a.indexOf(pickAsin);
+    if (e.target.checked && k < 0) l.a.push(pickAsin);
+    if (!e.target.checked && k > -1) l.a.splice(k, 1);
+    afterListChange();
+  });
+
+  document.addEventListener("keydown", function(e){
+    if (!pick) return;
+    if (e.key === "Escape") closePick();
+    else if (e.key === "Enter" && pick.contains(e.target) && e.target.type === "text") createList();
+  });
+
+  listSel.addEventListener("change", function(){
+    view = listSel.value;
     render();
   });
 
   reload.addEventListener("click", function(){ load(true); });
   q.addEventListener("input", render);
 
-  favLoad();
+  listsLoad();
+  fillListSel();
 
   // Chuyển tab — chỉ tải data áo khi mở tab lần đầu
   var wrap = document.querySelector(".wrap"),
