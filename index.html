@@ -100,6 +100,10 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .rank{color:var(--live);font-weight:700;font-size:15.5px;letter-spacing:-.01em}
 .m-title{font-size:12.5px;line-height:1.35;color:var(--far);text-decoration:none;word-break:break-word}
 .m-title:hover{text-decoration:underline}
+.m-title.die{text-decoration:line-through;color:var(--ink-3)}
+.m-title.die:hover{text-decoration:line-through underline}
+.dead{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;font-size:11px;
+  font-weight:700;letter-spacing:.02em;vertical-align:middle;background:var(--ink-3);color:#fff}
 .m-row{font-size:11.5px;color:var(--ink-2);word-break:break-word}
 .m-row b{color:var(--ink);font-weight:600}
 .asin{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -190,6 +194,11 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
   <span class="seg" id="msort">
     <button class="on" data-by="rank">Rank</button>
     <button data-by="date">Ngày thêm</button>
+  </span>
+  <span class="seg" id="mstat">
+    <button class="on" data-st="">Tất cả</button>
+    <button data-st="live">Live</button>
+    <button data-st="die">Die</button>
   </span>
   <button id="mfavlist">Danh Sách Favorite</button>
   <button id="mhide">Ẩn áo trong list</button>
@@ -402,11 +411,13 @@ var CACHE_MINUTES = 30;
   // số = chỉ số list đang mở.
   // HIDE: tên các list (chữ thường) có áo bị ẩn khỏi lưới tất cả sản phẩm
   var INFO_KEY = "podmerch_info", HIDE_KEY = "podmerch_hide";
-  var DATA = [], sortBy = "rank", LISTS = [], INFO = {}, view = "", HIDE = [];
+  // statF: "" = tất cả, "live", "die" (áo có x = 1 là đã bị gỡ)
+  var DATA = [], sortBy = "rank", LISTS = [], INFO = {}, view = "", HIDE = [], statF = "";
   var topReady = false, curTab = "cal";
 
   var q = document.getElementById("mq"),
       seg = document.getElementById("msort"),
+      statSeg = document.getElementById("mstat"),
       favListBtn = document.getElementById("mfavlist"),
       hideBtn = document.getElementById("mhide"),
       crumb = document.getElementById("mcrumb"),
@@ -558,6 +569,9 @@ var CACHE_MINUTES = 30;
       nHid = DATA.length - src.length;
     }
     var rows = src.filter(function(it){
+      // Áo đã rớt khỏi data không rõ trạng thái nên chỉ hiện ở "Tất cả"
+      if (statF === "live" && (it.x || it.gone)) return false;
+      if (statF === "die" && !it.x) return false;
       if (!term) return true;
       return (it.t + " " + it.b + " " + it.a).toLowerCase().indexOf(term) > -1;
     }).sort(function(a, b){
@@ -595,8 +609,9 @@ var CACHE_MINUTES = 30;
         '<div class="info">' +
           (it.gone
             ? '<span class="gone">Không còn trong data hiện tại</span>'
-            : '<span class="rank">&#8593; ' + num(it.r || 0) + '</span>') +
-          '<a class="m-title" href="' + esc(it.u) + '" target="_blank" rel="noopener">' +
+            : '<span class="rank">&#8593; ' + num(it.r || 0) +
+              (it.x ? '<span class="dead">Die</span>' : '') + '</span>') +
+          '<a class="m-title' + (it.x ? ' die' : '') + '" href="' + esc(it.u) + '" target="_blank" rel="noopener">' +
             esc(it.t) + '</a>' +
           asin + brand +
           '<span class="age">' + esc(ageOf(it.d)) + '</span>' +
@@ -776,6 +791,15 @@ var CACHE_MINUTES = 30;
     if (!b) return;
     sortBy = b.getAttribute("data-by");
     var all = seg.querySelectorAll("button");
+    for (var i = 0; i < all.length; i++) all[i].className = (all[i] === b) ? "on" : "";
+    render();
+  });
+
+  statSeg.addEventListener("click", function(e){
+    var b = e.target.closest ? e.target.closest("[data-st]") : null;
+    if (!b) return;
+    statF = b.getAttribute("data-st");
+    var all = statSeg.querySelectorAll("button");
     for (var i = 0; i < all.length; i++) all[i].className = (all[i] === b) ? "on" : "";
     render();
   });
