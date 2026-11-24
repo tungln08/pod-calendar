@@ -98,6 +98,9 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .save.on{background:var(--hot);border-color:var(--hot);color:#fff}
 .info{padding:9px 10px 11px;display:flex;flex-direction:column;gap:3px}
 .rank{color:var(--live);font-weight:700;font-size:15.5px;letter-spacing:-.01em}
+.price{margin-left:10px;color:var(--ink);font-weight:700}
+.price.wait{color:var(--ink-3);font-weight:400;font-size:12px;font-style:italic}
+.price.na{color:var(--ink-3);font-weight:400}
 .m-title{font-size:12.5px;line-height:1.35;color:var(--far);text-decoration:none;word-break:break-word}
 .m-title:hover{text-decoration:underline}
 .m-title.die{text-decoration:line-through;color:var(--ink-3)}
@@ -442,6 +445,7 @@ var MYSHIRT_EXCLUDE_KEYWORDS = [];
 //   scope  — ?scope= cho list thả tim ("" = tab đầu của Sheet; tab khác có list riêng)
 //   exclude — từ khoá loại trừ; top — có nuôi dải 6 áo trên tab Lịch không
 //   folderVar — tên biến folder trong Code.gs, để báo lỗi cho đúng
+//   price  — hiện giá bên phải rank (Apps Script mở ngầm trang Amazon để đọc giá)
 function MerchTab(cfg){
   var EXCLUDE_KEYWORDS = cfg.exclude || [];
   var FAV_KEY = cfg.key + "_fav", LISTS_KEY = cfg.key + "_lists", CACHE_KEY = cfg.key + "_data";
@@ -652,7 +656,7 @@ function MerchTab(cfg){
         '<div class="info">' +
           (it.gone
             ? '<span class="gone">Không còn trong data hiện tại</span>'
-            : '<span class="rank">&#8593; ' + num(it.r || 0) +
+            : '<span class="rank">&#8593; ' + num(it.r || 0) + priceTag(it) +
               (it.x ? '<span class="dead">Die</span>' : '') + '</span>') +
           '<a class="m-title' + (it.x ? ' die' : '') + '" href="' + esc(it.u) + '" target="_blank" rel="noopener">' +
             esc(it.t) + '</a>' +
@@ -660,6 +664,66 @@ function MerchTab(cfg){
           '<span class="age">' + esc(ageOf(it.d)) + '</span>' +
         '</div></article>';
     }).join("");
+    priceQueue(rows);
+  }
+
+  // ==== Giá: CSV không có giá nên hỏi Apps Script (?type=price), nó mở trang Amazon đọc giá ====
+  // Áo nào chưa có giá thì hiện "loading" ở chỗ giá, có kết quả thì điền vào.
+  // Giá lưu trên trình duyệt PRICE_HOURS giờ. "none" = trang không có giá; đọc lỗi thì hiện "—".
+  var PRICE_KEY = cfg.key + "_price", PRICE_HOURS = 6, PRICE_BATCH = 6, PRICE_PARALLEL = 2;
+  var PRICE = {}, priceQ = [], priceBusy = 0, priceAsked = {}, priceFail = {};
+  if (cfg.price){
+    try { PRICE = JSON.parse(localStorage.getItem(PRICE_KEY) || "{}") || {}; } catch(e){ PRICE = {}; }
+    for (var pa in PRICE) if (!priceFresh(pa)) delete PRICE[pa];
+  }
+
+  function priceFresh(a){
+    var o = PRICE[a];
+    return (o && Date.now() - o.at < PRICE_HOURS * 3600000) ? o.v : null;
+  }
+
+  function priceTag(it){
+    if (!cfg.price || !it.a) return "";
+    var v = priceFresh(it.a);
+    if (v == null && priceFail[it.a]) v = "";
+    if (v == null) return ' <span class="price wait" data-price="' + esc(it.a) + '">loading</span>';
+    return ' <span class="price' + (v && v !== "none" ? "" : " na") + '" data-price="' + esc(it.a) + '"' +
+      (v ? "" : ' title="Không đọc được giá, bấm Tải lại để thử lại"') + '>' +
+      esc(v && v !== "none" ? v : "—") + '</span>';
+  }
+
+  function priceQueue(rows){
+    if (!cfg.price) return;
+    rows.forEach(function(it){
+      if (!it.a || it.gone || priceAsked[it.a] || priceFresh(it.a) != null) return;
+      priceAsked[it.a] = 1;
+      priceQ.push(it.a);
+    });
+    pricePump();
+  }
+
+  function pricePump(){
+    while (priceBusy < PRICE_PARALLEL && priceQ.length){
+      priceBusy++;
+      priceFetch(priceQ.splice(0, PRICE_BATCH));
+    }
+  }
+
+  function priceFetch(batch){
+    jsonp({type: "price", asins: batch.join(",")}, function(data){
+      priceBusy--;
+      var got = (data && data.prices) || {};
+      batch.forEach(function(a){
+        var v = got[a] || "";
+        if (v) PRICE[a] = {v: v, at: Date.now()}; else priceFail[a] = 1;
+        var tmp = document.createElement("span");
+        tmp.innerHTML = priceTag({a: a});
+        var els = grid.querySelectorAll('[data-price="' + a + '"]');
+        for (var i = 0; i < els.length; i++) els[i].outerHTML = tmp.innerHTML;
+      });
+      try { localStorage.setItem(PRICE_KEY, JSON.stringify(PRICE)); } catch(e){}
+      pricePump();
+    });
   }
 
   function cacheGet(){
@@ -758,6 +822,10 @@ function MerchTab(cfg){
   function load(force){
     if (!force && loaded) return;
     loaded = true;
+    if (force){
+      for (var fa in priceFail){ delete priceAsked[fa]; }
+      priceFail = {};
+    }
 
     if (!force){
       var c = cacheGet();
@@ -1120,7 +1188,8 @@ function MerchTab(cfg){
     merch: MerchTab({id: "m", key: "podmerch", type: "merch", scope: "",
                      exclude: MERCH_EXCLUDE_KEYWORDS, top: true, folderVar: "MERCH_FOLDER_ID"}),
     myshirt: MerchTab({id: "s", key: "podmyshirt", type: "myshirt", scope: "myshirt",
-                       exclude: MYSHIRT_EXCLUDE_KEYWORDS, top: false, folderVar: "MYSHIRT_FOLDER_ID"})
+                       exclude: MYSHIRT_EXCLUDE_KEYWORDS, top: false, folderVar: "MYSHIRT_FOLDER_ID",
+                       price: true})
   };
 
   // Chuyển tab — chỉ tải data áo khi mở tab lần đầu
