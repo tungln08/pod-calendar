@@ -234,8 +234,10 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
   </span>
   <button id="sfavlist" class="flag">Danh Sách Favorite</button>
   <button id="shide" class="flag">Ẩn áo trong list</button>
+  <button id="sprice">Cập nhật giá sản phẩm</button>
   <button id="sreload">Tải lại</button>
 </div>
+<p class="count" id="spricenote" hidden></p>
 
 <p class="excl" id="sexcl" hidden></p>
 <p class="count" id="slistnote" hidden></p>
@@ -445,7 +447,7 @@ var MYSHIRT_EXCLUDE_KEYWORDS = [];
 //   scope  — ?scope= cho list thả tim ("" = tab đầu của Sheet; tab khác có list riêng)
 //   exclude — từ khoá loại trừ; top — có nuôi dải 6 áo trên tab Lịch không
 //   folderVar — tên biến folder trong Code.gs, để báo lỗi cho đúng
-//   price  — hiện giá bên phải rank (Apps Script mở ngầm trang Amazon để đọc giá)
+//   price  — hiện giá bên phải rank + nút "Cập nhật giá sản phẩm" (#<id>price, #<id>pricenote)
 function MerchTab(cfg){
   var EXCLUDE_KEYWORDS = cfg.exclude || [];
   var FAV_KEY = cfg.key + "_fav", LISTS_KEY = cfg.key + "_lists", CACHE_KEY = cfg.key + "_data";
@@ -664,66 +666,182 @@ function MerchTab(cfg){
           '<span class="age">' + esc(ageOf(it.d)) + '</span>' +
         '</div></article>';
     }).join("");
-    priceQueue(rows);
   }
 
-  // ==== Giá: CSV không có giá nên hỏi Apps Script (?type=price), nó mở trang Amazon đọc giá ====
-  // Áo nào chưa có giá thì hiện "loading" ở chỗ giá, có kết quả thì điền vào.
-  // Giá lưu trên trình duyệt PRICE_HOURS giờ. "none" = trang không có giá; đọc lỗi thì hiện "—".
-  var PRICE_KEY = cfg.key + "_price", PRICE_HOURS = 6, PRICE_BATCH = 6, PRICE_PARALLEL = 2;
-  var PRICE = {}, priceQ = [], priceBusy = 0, priceAsked = {}, priceFail = {};
+  // ==== Giá: CSV không có giá. Giá lưu ở tab "Giá My Shirt" trong file Sheet list thả tim ====
+  // Mở tab chỉ đọc giá đã lưu (không mở trang Amazon nào). Bấm "Cập nhật giá sản phẩm":
+  //   1) Apps Script lấy giá tất cả áo (máy chủ Google), giá đọc được ghi luôn vào Sheet
+  //   2) Áo Apps Script không đọc được → nhờ extension Amazon ASIN Crawler trên máy này lấy
+  //      từng áo một (gặp captcha thì mở tab Amazon cho người dùng giải), kết quả ghi vào Sheet.
+  // PRICE: {ASIN: {v: "$14.44" | "none", at: "yyyy-MM-dd HH:mm", src: "server" | "extension"}}
+  var PRICE_KEY = cfg.key + "_price2", PRICE_BATCH = 8, PRICE_PARALLEL = 2, PRICE_SAVE_EVERY = 5;
+  var PRICE_EXT_ID = "gnkieegffdknjalmfednkoakmmlilabo";
+  var PRICE = {}, priceWait = {}, priceRun = null,
+      priceBtn = el("price"), priceNoteEl = el("pricenote");
   if (cfg.price){
     try { PRICE = JSON.parse(localStorage.getItem(PRICE_KEY) || "{}") || {}; } catch(e){ PRICE = {}; }
-    for (var pa in PRICE) if (!priceFresh(pa)) delete PRICE[pa];
+    if (priceBtn) priceBtn.addEventListener("click", priceUpdate);
   }
 
-  function priceFresh(a){
-    var o = PRICE[a];
-    return (o && Date.now() - o.at < PRICE_HOURS * 3600000) ? o.v : null;
+  function priceNote(msg){
+    if (!priceNoteEl) return;
+    priceNoteEl.textContent = msg || ""; priceNoteEl.hidden = !msg;
+  }
+
+  function priceWhen(o){
+    if (!o || !o.at) return "";
+    var m = String(o.at).match(/^(\d{4})-(\d\d)-(\d\d) (\d\d:\d\d)/);
+    var t = m ? m[3] + "/" + m[2] + "/" + m[1] + " " + m[4] : o.at;
+    return "Cập nhật " + t + (o.src === "extension" ? " · qua extension" : o.src === "server" ? " · qua máy chủ" : "");
   }
 
   function priceTag(it){
     if (!cfg.price || !it.a) return "";
-    var v = priceFresh(it.a);
-    if (v == null && priceFail[it.a]) v = "";
-    if (v == null) return ' <span class="price wait" data-price="' + esc(it.a) + '">loading</span>';
-    return ' <span class="price' + (v && v !== "none" ? "" : " na") + '" data-price="' + esc(it.a) + '"' +
-      (v ? "" : ' title="Không đọc được giá, bấm Tải lại để thử lại"') + '>' +
-      esc(v && v !== "none" ? v : "—") + '</span>';
+    var a = esc(it.a), o = PRICE[it.a];
+    if (priceWait[it.a]) return ' <span class="price wait" data-price="' + a + '">loading</span>';
+    if (!o || !o.v) return ' <span class="price na" data-price="' + a + '" title="Chưa có giá. Bấm Cập nhật giá sản phẩm">—</span>';
+    if (o.v === "none") return ' <span class="price na" data-price="' + a + '" title="' +
+      esc("Không có giá (áo đã gỡ hoặc hết hàng). " + priceWhen(o)) + '">—</span>';
+    return ' <span class="price" data-price="' + a + '" title="' + esc(priceWhen(o)) + '">' + esc(o.v) + '</span>';
   }
 
-  function priceQueue(rows){
+  function pricePaint(a){
+    var html = priceTag({a: a}), els = grid.querySelectorAll('[data-price="' + a + '"]');
+    for (var i = 0; i < els.length; i++) els[i].outerHTML = html;
+  }
+
+  function priceMerge(got){
+    for (var a in (got || {})) if (got[a] && got[a].v) PRICE[a] = got[a];
+    try { localStorage.setItem(PRICE_KEY, JSON.stringify(PRICE)); } catch(e){}
+  }
+
+  // Đọc giá đã lưu trong Sheet (mỗi lần mở / tải lại tab)
+  function priceLoad(){
     if (!cfg.price) return;
-    rows.forEach(function(it){
-      if (!it.a || it.gone || priceAsked[it.a] || priceFresh(it.a) != null) return;
-      priceAsked[it.a] = 1;
-      priceQ.push(it.a);
+    jsonp({type: "price", op: "get"}, function(data){
+      if (!data || !data.prices) return;
+      PRICE = {};
+      priceMerge(data.prices);
+      if (!priceRun) render();
     });
-    pricePump();
   }
 
-  function pricePump(){
-    while (priceBusy < PRICE_PARALLEL && priceQ.length){
-      priceBusy++;
-      priceFetch(priceQ.splice(0, PRICE_BATCH));
+  function priceUpdate(){
+    if (!cfg.price || priceRun) return;
+    var asins = [], seen = {};
+    DATA.forEach(function(it){ if (it.a && !seen[it.a]){ seen[it.a] = 1; asins.push(it.a); } });
+    if (!asins.length){ priceNote("Chưa có áo nào để cập nhật giá."); return; }
+
+    var run = priceRun = {total: asins.length, ok: 0, done: 0, failed: [], q: asins.slice(), busy: 0};
+    asins.forEach(function(a){ priceWait[a] = 1; });
+    priceBtn.disabled = true;
+    render();
+    priceNote("Bước 1/2 · Máy chủ đang lấy giá: 0/" + run.total + "…");
+
+    function pump(){
+      while (run.busy < PRICE_PARALLEL && run.q.length){
+        run.busy++;
+        fetchBatch(run.q.splice(0, PRICE_BATCH));
+      }
+      if (!run.busy && !run.q.length) priceStep2(run);
     }
+    function fetchBatch(batch){
+      jsonp({type: "price", op: "fetch", asins: batch.join(",")}, function(data){
+        run.busy--;
+        run.done += batch.length;
+        var got = (data && data.prices) || {};
+        priceMerge(got);
+        batch.forEach(function(a){
+          if (got[a] && got[a].v){ run.ok++; delete priceWait[a]; pricePaint(a); }
+          else run.failed.push(a);
+        });
+        priceNote("Bước 1/2 · Máy chủ đang lấy giá: " + run.done + "/" + run.total + " · có giá " + run.ok + "…");
+        pump();
+      });
+    }
+    pump();
   }
 
-  function priceFetch(batch){
-    jsonp({type: "price", asins: batch.join(",")}, function(data){
-      priceBusy--;
-      var got = (data && data.prices) || {};
-      batch.forEach(function(a){
-        var v = got[a] || "";
-        if (v) PRICE[a] = {v: v, at: Date.now()}; else priceFail[a] = 1;
-        var tmp = document.createElement("span");
-        tmp.innerHTML = priceTag({a: a});
-        var els = grid.querySelectorAll('[data-price="' + a + '"]');
-        for (var i = 0; i < els.length; i++) els[i].outerHTML = tmp.innerHTML;
+  // Bước 2: áo máy chủ không đọc được → extension trên máy này
+  function priceStep2(run){
+    var left = run.failed.slice();
+    if (!left.length){ priceEnd(run, ""); return; }
+    var port = null, buf = [], keep = null, answered = false, idx = 0;
+    var head = "Bước 2/2 · Máy chủ lấy được " + run.ok + "/" + run.total + ". Extension đang lấy " + left.length + " áo còn lại";
+
+    function flush(){
+      if (!buf.length) return;
+      var data = buf.splice(0).map(function(r){ return r.a + "|" + r.v; }).join(",");
+      jsonp({type: "price", op: "set", data: data}, function(res){
+        if (res && res.prices){ priceMerge(res.prices); }
       });
-      try { localStorage.setItem(PRICE_KEY, JSON.stringify(PRICE)); } catch(e){}
-      pricePump();
+    }
+    function stop(reason){
+      if (keep){ clearInterval(keep); keep = null; }
+      flush();
+      if (port){ try { port.disconnect(); } catch(e){} port = null; }
+      priceEnd(run, reason);
+    }
+
+    try {
+      if (!(window.chrome && chrome.runtime && chrome.runtime.connect)) throw 0;
+      port = chrome.runtime.connect(PRICE_EXT_ID, {name: "pod-price"});
+    } catch(e){
+      stop("Còn " + left.length + " áo chưa lấy được giá: trình duyệt này chưa cài extension Amazon ASIN Crawler (bản 1.10 trở lên).");
+      return;
+    }
+    port.onDisconnect.addListener(function(){
+      void chrome.runtime.lastError; // đọc để Chrome không báo "Unchecked runtime.lastError"
+      port = null;
+      if (!priceRun) return;
+      stop(answered ? "Extension ngắt kết nối giữa chừng." :
+        "Còn " + left.length + " áo chưa lấy được giá: không kết nối được extension Amazon ASIN Crawler" +
+        " (chưa cài, hoặc chưa phải bản 1.10).");
     });
+    port.onMessage.addListener(function(m){
+      answered = true;
+      if (!m) return;
+      if (m.op === "pong"){
+        port.postMessage({op: "prices", asins: left});
+        priceNote(head + ": 0/" + left.length + "…");
+      } else if (m.op === "price"){
+        idx++;
+        delete priceWait[m.asin];
+        if (m.price){
+          run.ok++;
+          PRICE[m.asin] = {v: m.price, at: priceNow(), src: "extension"};
+          buf.push({a: m.asin, v: m.price});
+          if (buf.length >= PRICE_SAVE_EVERY) flush();
+        }
+        pricePaint(m.asin);
+        priceNote(head + ": " + idx + "/" + left.length + "…");
+      } else if (m.op === "captcha"){
+        priceNote(head + ": " + idx + "/" + left.length + " · Amazon yêu cầu xác minh. Hãy giải captcha trên tab Amazon vừa mở, xong extension sẽ tự lấy tiếp.");
+      } else if (m.op === "resumed"){
+        priceNote(head + ": " + idx + "/" + left.length + "…");
+      } else if (m.op === "done"){
+        stop(m.stopped ? (m.reason || "Extension đã dừng.") : "");
+      }
+    });
+    keep = setInterval(function(){ if (port) try { port.postMessage({op: "keepalive"}); } catch(e){} }, 20000);
+    port.postMessage({op: "ping"});
+  }
+
+  function priceNow(){
+    var d = new Date(), p = function(n){ return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function priceEnd(run, reason){
+    if (priceRun !== run) return;
+    priceRun = null;
+    priceWait = {};
+    try { localStorage.setItem(PRICE_KEY, JSON.stringify(PRICE)); } catch(e){}
+    priceBtn.disabled = false;
+    render();
+    var miss = run.total - run.ok;
+    priceNote("Đã cập nhật giá " + run.ok + "/" + run.total + " áo" +
+      (miss ? " · " + miss + " áo không lấy được (giữ giá cũ nếu có)" : "") + (reason ? ". " + reason : "."));
   }
 
   function cacheGet(){
@@ -822,10 +940,7 @@ function MerchTab(cfg){
   function load(force){
     if (!force && loaded) return;
     loaded = true;
-    if (force){
-      for (var fa in priceFail){ delete priceAsked[fa]; }
-      priceFail = {};
-    }
+    priceLoad();
 
     if (!force){
       var c = cacheGet();
