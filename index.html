@@ -121,7 +121,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 .pick-new input{flex:1 1 auto;min-width:0;font:inherit;font-size:13px;padding:6px 8px;
   border:1px solid var(--line);border-radius:6px}
 .pick-new button{padding:6px 10px;font-size:13px}
-#mfavlist.on,#mhide.on{background:var(--hot);border-color:var(--hot);color:#fff;font-weight:600}
+.flag.on{background:var(--hot);border-color:var(--hot);color:#fff;font-weight:600}
 .crumb{display:flex;align-items:center;gap:8px;font-size:15px;margin:4px 0 10px}
 .crumb button{padding:6px 12px;font-size:13.5px}
 .crumb b{font-weight:700}
@@ -160,6 +160,7 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 <div class="tabs">
   <button class="tab on" data-panel="cal">Lịch POD</button>
   <button class="tab" data-panel="merch">Áo Merch</button>
+  <button class="tab" data-panel="myshirt">My Shirt</button>
 </div>
 
 <section id="panel-cal">
@@ -200,8 +201,8 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
     <button data-st="live">Live</button>
     <button data-st="die">Die</button>
   </span>
-  <button id="mfavlist">Danh Sách Favorite</button>
-  <button id="mhide">Ẩn áo trong list</button>
+  <button id="mfavlist" class="flag">Danh Sách Favorite</button>
+  <button id="mhide" class="flag">Ẩn áo trong list</button>
   <button id="mreload">Tải lại</button>
 </div>
 
@@ -212,6 +213,34 @@ footer{margin-top:28px;font-size:12.5px;color:var(--ink-3)}
 <div class="grid" id="mgrid"></div>
 
 <footer id="mfoot"></footer>
+
+</section>
+
+<section id="panel-myshirt" hidden>
+
+<div class="controls">
+  <input type="search" id="sq" placeholder="Tìm theo tiêu đề, brand hoặc ASIN">
+  <span class="seg" id="ssort">
+    <button class="on" data-by="rank">Rank</button>
+    <button data-by="date">Ngày thêm</button>
+  </span>
+  <span class="seg" id="sstat">
+    <button class="on" data-st="">Tất cả</button>
+    <button data-st="live">Live</button>
+    <button data-st="die">Die</button>
+  </span>
+  <button id="sfavlist" class="flag">Danh Sách Favorite</button>
+  <button id="shide" class="flag">Ẩn áo trong list</button>
+  <button id="sreload">Tải lại</button>
+</div>
+
+<p class="excl" id="sexcl" hidden></p>
+<p class="count" id="slistnote" hidden></p>
+<div class="crumb" id="scrumb" hidden></div>
+<p class="count" id="scount"></p>
+<div class="grid" id="sgrid"></div>
+
+<footer id="sfoot"></footer>
 
 </section>
 
@@ -394,38 +423,52 @@ var CACHE_MINUTES = 30;
 })();
 
 
-// ==== Tab áo Merch ====
-(function(){
-  var FAV_KEY = "podmerch_fav", LISTS_KEY = "podmerch_lists", CACHE_KEY = "podmerch_data";
-  var MERCH_CACHE_MINUTES = 60;
-
-  // Áo có tiêu đề hoặc brand chứa các từ khoá này bị loại khỏi lưới và dải 6 áo
-  var EXCLUDE_KEYWORDS = ["Jeff Dunham", "Disney", "Marvel", "Harry Potter", "Dr. Seuss",
+// ==== Tab áo Merch / My Shirt ====
+// Từ khoá loại trừ, mỗi tab một danh sách riêng: áo có tiêu đề hoặc brand chứa từ khoá bị loại khỏi lưới.
+// Tab Áo Merch: danh sách này còn áp cho dải 6 áo trên tab Lịch.
+var MERCH_EXCLUDE_KEYWORDS = ["Jeff Dunham", "Disney", "Marvel", "Harry Potter", "Dr. Seuss",
     "Hello Kitty", "House of 1000 Corpses", "SpongeBob", "Schoolhouse Rock", "Sesame Street",
     "Coca-Cola", "Project Hail Mary", "Peanuts Store", "Practical Magic",
     "TEENAGE MUTANT NINJA Store", "Olivia Rodrigo", "Cartoon Network", "Midnight Margaritas",
     "Dolly Parton", "IT Movie", "Brainrot", "Paw Patrol", "One Piece"];
 
+// Tab My Shirt: điền từ khoá vào đây, ví dụ ["Disney", "Marvel"]
+var MYSHIRT_EXCLUDE_KEYWORDS = [];
+
+// Một tab lưới áo. cfg:
+//   id     — tiền tố id phần tử trong panel ("m" → #mq, #mgrid…)
+//   key    — tiền tố khoá localStorage (list, cache, ẩn list…)
+//   type   — ?type= gửi Apps Script để lấy data
+//   scope  — ?scope= cho list thả tim ("" = tab đầu của Sheet; tab khác có list riêng)
+//   exclude — từ khoá loại trừ; top — có nuôi dải 6 áo trên tab Lịch không
+//   folderVar — tên biến folder trong Code.gs, để báo lỗi cho đúng
+function MerchTab(cfg){
+  var EXCLUDE_KEYWORDS = cfg.exclude || [];
+  var FAV_KEY = cfg.key + "_fav", LISTS_KEY = cfg.key + "_lists", CACHE_KEY = cfg.key + "_data";
+  var MERCH_CACHE_MINUTES = 60;
+
   // LISTS: [{n: tên list, a: [ASIN...]}]. INFO: {ASIN: {t, u, i}} lưu kèm khi thả tim, để hiện
   // được cả áo đã rớt khỏi file data. view: "" = tất cả sản phẩm, "#" = các thẻ list,
   // số = chỉ số list đang mở.
   // HIDE: tên các list (chữ thường) có áo bị ẩn khỏi lưới tất cả sản phẩm
-  var INFO_KEY = "podmerch_info", HIDE_KEY = "podmerch_hide";
+  var INFO_KEY = cfg.key + "_info", HIDE_KEY = cfg.key + "_hide";
   // statF: "" = tất cả, "live", "die" (áo có x = 1 là đã bị gỡ)
   var DATA = [], sortBy = "rank", LISTS = [], INFO = {}, view = "", HIDE = [], statF = "";
   var topReady = false, curTab = "cal";
 
-  var q = document.getElementById("mq"),
-      seg = document.getElementById("msort"),
-      statSeg = document.getElementById("mstat"),
-      favListBtn = document.getElementById("mfavlist"),
-      hideBtn = document.getElementById("mhide"),
-      crumb = document.getElementById("mcrumb"),
-      reload = document.getElementById("mreload"),
-      grid = document.getElementById("mgrid"),
-      cnt = document.getElementById("mcount"),
-      foot = document.getElementById("mfoot"),
-      exclBox = document.getElementById("mexcl");
+  function el(name){ return document.getElementById(cfg.id + name); }
+
+  var q = el("q"),
+      seg = el("sort"),
+      statSeg = el("stat"),
+      favListBtn = el("favlist"),
+      hideBtn = el("hide"),
+      crumb = el("crumb"),
+      reload = el("reload"),
+      grid = el("grid"),
+      cnt = el("count"),
+      foot = el("foot"),
+      exclBox = el("excl");
 
   var today = new Date(); today.setHours(0,0,0,0);
 
@@ -516,10 +559,10 @@ var CACHE_MINUTES = 30;
   function updateFav(){
     if (view !== "" && view !== "#" && !LISTS[+view]) view = "#";
     favListBtn.textContent = "Danh Sách Favorite (" + LISTS.length + ")";
-    favListBtn.className = (view !== "") ? "on" : "";
+    favListBtn.classList.toggle("on", view !== "");
     var nh = hiddenLists().length;
     hideBtn.textContent = "Ẩn áo trong list" + (nh ? " (" + nh + ")" : "");
-    hideBtn.className = nh ? "on" : "";
+    hideBtn.classList.toggle("on", !!nh);
     hideBtn.hidden = (view !== "");
 
     if (view === "" || view === "#"){ crumb.hidden = true; return; }
@@ -635,6 +678,7 @@ var CACHE_MINUTES = 30;
 
   // Dải 6 áo rank tốt nhất, nằm trên tab Lịch
   function renderTop(){
+    if (!cfg.top) return;
     var box = document.getElementById("topmerch"),
         row = document.getElementById("topRow");
     if (!box || !row) return;
@@ -664,6 +708,7 @@ var CACHE_MINUTES = 30;
   // Dải này chỉ có nghĩa ở tab Lịch. Sang tab Áo Merch thì lưới ngay bên dưới
   // đã có đủ 300 áo, hiện lại 6 áo đầu là thừa.
   function syncTop(){
+    if (!cfg.top) return;
     var box = document.getElementById("topmerch");
     if (box) box.hidden = !(topReady && curTab === "cal");
   }
@@ -675,7 +720,7 @@ var CACHE_MINUTES = 30;
     // Nhận diện để báo đúng bệnh, thay vì hiện "0 sản phẩm".
     if (!data.items){
       showErr("Apps Script đang chạy bản cũ, chưa có nhánh dữ liệu áo. " +
-        "Vào Apps Script dán Code.gs mới, điền MERCH_FOLDER_ID, rồi Quản lý bản " +
+        "Vào Apps Script dán Code.gs mới, điền " + cfg.folderVar + ", rồi Quản lý bản " +
         "triển khai → sửa → Phiên bản mới.");
       return;
     }
@@ -685,10 +730,12 @@ var CACHE_MINUTES = 30;
       if (excluded(it)){ removed++; return false; }
       return true;
     });
-    exclBox.innerHTML = "Đã loại trừ các từ khóa này: <b>" +
-      esc(EXCLUDE_KEYWORDS.join(", ")) + "</b>" +
-      " (bỏ " + num(removed) + " sản phẩm)";
-    exclBox.hidden = false;
+    if (EXCLUDE_KEYWORDS.length){
+      exclBox.innerHTML = "Đã loại trừ các từ khóa này: <b>" +
+        esc(EXCLUDE_KEYWORDS.join(", ")) + "</b>" +
+        " (bỏ " + num(removed) + " sản phẩm)";
+      exclBox.hidden = false;
+    }
     renderTop();
     foot.textContent = "Nguồn: " + (data.file || "CSV") + " trên Google Drive qua Apps Script" +
       (data.updated ? " · cập nhật " + data.updated : "") +
@@ -720,7 +767,7 @@ var CACHE_MINUTES = 30;
     grid.innerHTML = '<p class="msg">Đang tải…</p>';
 
     // JSONP: nạp API như một file script để tránh lỗi CORS
-    var name = "__podmerch_" + Date.now();
+    var name = "__" + cfg.key + "_" + Date.now();
     var script = document.createElement("script");
     var done = false;
 
@@ -741,7 +788,7 @@ var CACHE_MINUTES = 30;
       if (c){ apply(c.data, true); return; }
       loaded = false;
       showErr("Không tải được data áo. " + msg +
-        " Kiểm tra web app đã deploy chế độ Anyone và Code.gs đã điền MERCH_FOLDER_ID chưa.");
+        " Kiểm tra web app đã deploy chế độ Anyone và Code.gs đã điền " + cfg.folderVar + " chưa.");
     }
 
     window[name] = function(data){
@@ -758,7 +805,7 @@ var CACHE_MINUTES = 30;
     };
 
     script.src = API_URL + (API_URL.indexOf("?") > -1 ? "&" : "?") +
-      "type=merch&callback=" + name + "&_=" + Date.now();
+      "type=" + cfg.type + "&callback=" + name + "&_=" + Date.now();
     document.head.appendChild(script);
   }
 
@@ -896,13 +943,14 @@ var CACHE_MINUTES = 30;
   // ==== Đồng bộ list với Google Sheet "Merch Favorite List" qua Apps Script ====
   // Giao diện đổi ngay khi bấm; các thao tác được gửi lần lượt từng cái một để server
   // xử lý đúng thứ tự, rồi lấy trạng thái server trả về làm chuẩn.
-  var SYNCED_KEY = "podmerch_lists_synced",
-      noteEl = document.getElementById("mlistnote"),
-      queue = [], busy = false;
+  var SYNCED_KEY = cfg.key + "_lists_synced",
+      noteEl = el("listnote"),
+      queue = [], busy = false, scopeReady = !cfg.scope;
 
   function listNote(msg){ noteEl.textContent = msg || ""; noteEl.hidden = !msg; }
 
   function jsonp(params, cb){
+    if (cfg.scope) params.scope = cfg.scope;
     var name = "__podlists_" + Date.now() + "_" + Math.floor(Math.random() * 1e6),
         script = document.createElement("script"), done = false, qs = [];
     var timer = setTimeout(function(){ finish({error: "Quá thời gian chờ."}); }, 30000);
@@ -940,9 +988,12 @@ var CACHE_MINUTES = 30;
     if (busy || !queue.length) return;
     busy = true;
     var params = queue.shift();
+    // Server chưa xác nhận đúng tab list thì không gửi thêm/bớt, chỉ giữ trên trình duyệt
+    if (params.op !== "get" && !scopeReady){ busy = false; pump(); return; }
     if (params.op !== "add"){ delete params.t; delete params.u; delete params.i; }
     jsonp(params, function(data){
       busy = false;
+      if (params.op === "get" && data && data.lists && scopeOk(data)) scopeReady = true;
       if (params.op === "get") firstSync(data);
       // Còn thao tác đang chờ thì chưa lấy kết quả này, kẻo đè mất thay đổi vừa bấm
       if (!queue.length || !data || !data.lists) fromServer(data);
@@ -951,8 +1002,11 @@ var CACHE_MINUTES = 30;
   }
 
   // Lần đầu nối được Sheet mà Sheet còn trống: đẩy các list đang có trên trình duyệt lên
+  // Apps Script bản cũ không biết scope: nó đọc/ghi tab list của Áo Merch. Coi như chưa đồng bộ.
+  function scopeOk(data){ return !cfg.scope || (data && data.scope === cfg.scope); }
+
   function firstSync(data){
-    if (!data || !data.lists) return;
+    if (!data || !data.lists || !scopeOk(data)) return;
     var flag = null;
     try { flag = localStorage.getItem(SYNCED_KEY); localStorage.setItem(SYNCED_KEY, "1"); } catch(e){}
     if (flag || data.lists.length) return;
@@ -961,7 +1015,7 @@ var CACHE_MINUTES = 30;
   }
 
   function fromServer(data){
-    if (!data || !data.lists){
+    if (!data || !data.lists || !scopeOk(data)){
       listNote("Chưa đồng bộ Google Sheet — list đang lưu tạm trên trình duyệt này. " +
         (data && data.error ? "(" + data.error + ")" : "(Apps Script chưa deploy bản mới.)"));
       return;
@@ -1055,29 +1109,42 @@ var CACHE_MINUTES = 30;
   updateFav();
   syncGet();
 
+  return {
+    load: load,
+    setTab: function(key){ curTab = key; syncTop(); }
+  };
+}
+
+(function(){
+  var tabsApi = {
+    merch: MerchTab({id: "m", key: "podmerch", type: "merch", scope: "",
+                     exclude: MERCH_EXCLUDE_KEYWORDS, top: true, folderVar: "MERCH_FOLDER_ID"}),
+    myshirt: MerchTab({id: "s", key: "podmyshirt", type: "myshirt", scope: "myshirt",
+                       exclude: MYSHIRT_EXCLUDE_KEYWORDS, top: false, folderVar: "MYSHIRT_FOLDER_ID"})
+  };
+
   // Chuyển tab — chỉ tải data áo khi mở tab lần đầu
   var wrap = document.querySelector(".wrap"),
       tabs = document.querySelectorAll(".tab"),
       panels = { cal: document.getElementById("panel-cal"),
-                 merch: document.getElementById("panel-merch") };
+                 merch: document.getElementById("panel-merch"),
+                 myshirt: document.getElementById("panel-myshirt") };
 
   for (var i = 0; i < tabs.length; i++){
     tabs[i].addEventListener("click", function(){
       var key = this.getAttribute("data-panel");
       for (var j = 0; j < tabs.length; j++)
         tabs[j].className = (tabs[j] === this) ? "tab on" : "tab";
-      panels.cal.hidden = (key !== "cal");
-      panels.merch.hidden = (key !== "merch");
-      wrap.className = (key === "merch") ? "wrap wide" : "wrap";
-      curTab = key;
-      syncTop();
-      if (key === "merch") load(false);
+      for (var k in panels) panels[k].hidden = (k !== key);
+      wrap.className = (key !== "cal") ? "wrap wide" : "wrap";
+      for (var t in tabsApi) tabsApi[t].setTab(key);
+      if (tabsApi[key]) tabsApi[key].load(false);
     });
   }
 
-  // Tải sẵn để dải 6 áo hiện được ngay trên tab Lịch. Lần sau vào lại thì
-  // đọc từ localStorage nên không tốn thêm lượt gọi Apps Script.
-  load(false);
+  // Tải sẵn data Áo Merch để dải 6 áo hiện được ngay trên tab Lịch. Lần sau vào lại thì
+  // đọc từ localStorage nên không tốn thêm lượt gọi Apps Script. My Shirt chỉ tải khi mở tab.
+  tabsApi.merch.load(false);
 })();
 </script>
 </body>
